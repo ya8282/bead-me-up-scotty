@@ -6,7 +6,7 @@ const pExecFile = promisify(execFile);
 const MAX_OUT = 8 * 1024 * 1024;
 
 /**
- * Run the Claude CLI in print mode with the prompt as an argument.
+ * Run the Claude CLI with the given args and collect stdout.
  *
  * Critically, stdin is `/dev/null` (stdio[0] = "ignore"). `execFile` would leave
  * an open stdin pipe, so `claude` waits for piped input, prints "no stdin data
@@ -14,7 +14,7 @@ const MAX_OUT = 8 * 1024 * 1024;
  * read the prompt from `-p` immediately. We only surface stderr (which includes
  * harmless connector/auth warnings) when the process actually exits non-zero.
  */
-function childEnv(): NodeJS.ProcessEnv {
+export function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   // A placeholder/invalid ANTHROPIC_API_KEY (e.g. "your_api_key_here" left in a
   // shell profile) takes precedence over the Claude Code subscription login and
@@ -26,9 +26,9 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function runClaude(prompt: string, timeoutMs: number): Promise<string> {
+export function runClaudeCli(args: string[], timeoutMs: number, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(CLAUDE_BIN, ["-p", prompt], { stdio: ["ignore", "pipe", "pipe"], env: childEnv() });
+    const child = spawn(CLAUDE_BIN, args, { stdio: ["ignore", "pipe", "pipe"], env: childEnv(), cwd });
     let stdout = "";
     let stderr = "";
     let done = false;
@@ -72,7 +72,7 @@ function runClaude(prompt: string, timeoutMs: number): Promise<string> {
 }
 // Mirrors the BD_BIN pattern: shell out to the user's local Claude CLI. No API
 // key — it reuses the existing Claude Code / CLI auth on the machine.
-const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
+export const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 
 export class AiError extends Error {
   code?: string;
@@ -154,7 +154,7 @@ export async function assistBead(input: AssistInput): Promise<AssistResult> {
       "claude_unavailable",
     );
   }
-  const stdout = await runClaude(buildPrompt(input), 120_000);
+  const stdout = await runClaudeCli(["-p", buildPrompt(input)], 120_000);
 
   let parsed: Partial<AssistResult>;
   try {

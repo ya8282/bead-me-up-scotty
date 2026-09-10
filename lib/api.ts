@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { BdError } from "./bd";
 import { ConfigError } from "./config";
+import { AiError } from "./ai";
 
 export function ok(data: unknown, init?: number) {
   return NextResponse.json(data, { status: init ?? 200 });
@@ -34,6 +35,22 @@ export function fail(err: unknown) {
     // integration failure, not a bad client request.
     const status =
       err.code === "not_found" ? 404 : err.code === "parse_error" ? 500 : 400;
+    return NextResponse.json({ error: err.message, code: err.code }, { status });
+  }
+  if (err instanceof AiError) {
+    // A live goal run is a precondition conflict: the request was well-formed
+    // and retrying it verbatim works once that run finishes.
+    const status =
+      err.code === "goal_run_active"
+        ? 409
+        : err.code === "claude_unavailable"
+          ? 503
+          : err.code === "invalid_input" ||
+              err.code === "empty_goal_set" ||
+              err.code === "goal_set_too_large" ||
+              err.code === "no_repo_path"
+            ? 400
+            : 500;
     return NextResponse.json({ error: err.message, code: err.code }, { status });
   }
   if (err instanceof ConfigError) {

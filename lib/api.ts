@@ -45,7 +45,9 @@ export function fail(err: unknown) {
         ? 409
         : err.code === "unknown_run"
           ? 404
-          : err.code === "claude_unavailable"
+          : err.code === "not_waiting" || err.code === "prompt_changed"
+            ? 409
+            : err.code === "claude_unavailable" || err.code === "python_unavailable"
           ? 503
           : err.code === "invalid_input" ||
               err.code === "empty_goal_set" ||

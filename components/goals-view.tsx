@@ -5,7 +5,8 @@ import { Icon } from "@/components/icons";
 import { CopyableId } from "@/components/copyable-id";
 import { useGoalFeed, useGoalRuns } from "@/hooks/use-goal";
 import { fmtDateTime, relTime } from "@/lib/beads-view";
-import type { GoalFeedItem, GoalRun } from "@/lib/api-client";
+import { GoalQuestion } from "@/components/goal-question";
+import type { GoalFeedItem, GoalPrompt, GoalRun } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 const STATE_COLOR: Record<string, string> = {
@@ -97,6 +98,7 @@ export function GoalsView() {
               run={feedQuery.data?.run ?? run}
               items={feedQuery.data?.items ?? []}
               screen={feedQuery.data?.screen ?? null}
+              prompt={feedQuery.data?.prompt ?? null}
               loading={feedQuery.isLoading}
               error={feedQuery.error as Error | null}
             />
@@ -135,12 +137,14 @@ function RunOutput({
   run,
   items,
   screen,
+  prompt,
   loading,
   error,
 }: {
   run: GoalRun;
   items: GoalFeedItem[];
   screen: string | null;
+  prompt: GoalPrompt | null;
   loading: boolean;
   error: Error | null;
 }) {
@@ -193,24 +197,8 @@ function RunOutput({
         )}
 
         {screen && (
-          <div
-            role="region"
-            aria-label="Waiting on you"
-            className="mt-3 rounded-[11px] border p-3"
-            style={{ borderColor: "#d97706", background: "color-mix(in srgb, #d97706 7%, var(--surface))" }}
-          >
-            <div className="mb-2 flex flex-wrap items-center gap-2 text-[12.5px]">
-              <span className="font-semibold" style={{ color: "#d97706" }}>
-                Waiting on you
-              </span>
-              <span className="text-[var(--text-2)]">
-                Its latest screen is below. Answer it with{" "}
-                <CopyableId id={`claude attach ${run.id}`} className="font-mono text-[12px]" /> in a terminal.
-              </span>
-            </div>
-            <pre className="bd-scroll m-0 max-h-[320px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-[var(--text)]">
-              {screen}
-            </pre>
+          <div className="mt-3">
+            <GoalQuestion run={run} prompt={prompt} screen={screen} />
           </div>
         )}
       </div>

@@ -75,6 +75,7 @@ export function Sidebar({
   // Shares the board's query, so this adds no polling of its own. A run waiting
   // on a person is the one thing worth seeing from every view.
   const activeRun = useGoalRuns(projectId, kind === "bd").data?.active ?? null;
+  const needsYouTotal = needsYouCount + (activeRun?.state === "blocked" ? 1 : 0);
 
   return (
     <aside className="flex w-[228px] flex-shrink-0 flex-col border-r border-border bg-[var(--surface)] p-[18px_14px]">
@@ -121,12 +122,12 @@ export function Sidebar({
                   {activeRun.state === "blocked" ? "waiting" : "live"}
                 </span>
               )}
-              {n.key === "needsyou" && needsYouCount > 0 && (
+              {n.key === "needsyou" && needsYouTotal > 0 && (
                 <span
                   className="min-w-[18px] rounded-full px-[6px] py-px text-center text-[11px] font-semibold text-white"
                   style={{ background: "var(--brand)" }}
                 >
-                  {needsYouCount}
+                  {needsYouTotal}
                 </span>
               )}
             </button>

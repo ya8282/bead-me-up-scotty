@@ -1,0 +1,183 @@
+"use client";
+import * as React from "react";
+import { useApp } from "@/components/app-context";
+import { CopyableId } from "@/components/copyable-id";
+import { useAnswerGoal, useGoalFeed } from "@/hooks/use-goal";
+import type { GoalPrompt, GoalRun } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+
+const AMBER = "#d97706";
+
+/**
+ * The question a waiting goal run is asking, answerable in place. Each choice
+ * is the number the terminal would take; "Type something" opens a box whose
+ * text is sent after it. Sending names the question by key, so if the run has
+ * moved on by then the server refuses rather than answering the wrong thing.
+ */
+export function GoalQuestion({
+  run,
+  prompt,
+  screen,
+}: {
+  run: GoalRun;
+  prompt: GoalPrompt | null;
+  screen: string | null;
+}) {
+  const { readOnly } = useApp();
+  const answer = useAnswerGoal();
+  const [typing, setTyping] = React.useState<number | null>(null);
+  const [text, setText] = React.useState("");
+  // The run repaints its next step a moment after an answer; until then the old
+  // question is still on screen and must not be answered twice.
+  const [sentKey, setSentKey] = React.useState<string | null>(null);
+  const sent = !!prompt && sentKey === prompt.key;
+  const disabled = readOnly || answer.isPending || sent;
+
+  const send = (option: number, typed?: string) => {
+    if (!prompt) return;
+    answer.mutate(
+      { runId: run.id, answer: { key: prompt.key, option, text: typed } },
+      {
+        onSuccess: () => {
+          setSentKey(prompt.key);
+          setTyping(null);
+          setText("");
+        },
+      },
+    );
+  };
+
+  return (
+    <section
+      aria-label={`Goal run ${run.id} is asking`}
+      className="rounded-[12px] border p-4"
+      style={{ borderColor: AMBER, background: `color-mix(in srgb, ${AMBER} 6%, var(--surface))` }}
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px]">
+        <span className="font-semibold" style={{ color: AMBER }}>
+          Goal run {run.id} is asking
+        </span>
+        {run.name && <span className="min-w-0 truncate text-[var(--text-2)]">{run.name}</span>}
+      </div>
+
+      {prompt ? (
+        <>
+          {prompt.tabs && (
+            <div className="mb-2 font-mono text-[11px] text-[var(--text-3)]">{prompt.tabs}</div>
+          )}
+          <p className="m-0 mb-3 whitespace-pre-wrap text-[13.5px] font-[550] leading-[1.45] text-[var(--text)]">
+            {prompt.question || "Choose one:"}
+          </p>
+          <div role="group" aria-label="Choices" className="flex flex-col gap-2">
+            {prompt.options.map((o) =>
+              typing === o.n ? (
+                <form
+                  key={o.n}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (text.trim()) send(o.n, text);
+                  }}
+                  className="flex flex-col gap-2 rounded-[9px] border border-[var(--brand)] bg-[var(--surface)] p-2"
+                >
+                  <textarea
+                    autoFocus
+                    aria-label="Your answer"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Type your answer"
+                    className="w-full resize-y rounded-[7px] border border-border bg-[var(--surface-2)] p-2 text-[13px] outline-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTyping(null)}
+                      className="h-8 rounded-[8px] border border-border px-3 text-[12.5px] text-[var(--text-2)]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={disabled || !text.trim()}
+                      className="h-8 rounded-[8px] px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+                      style={{ background: "var(--brand)" }}
+                    >
+                      {answer.isPending ? "Sending…" : "Send answer"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  key={o.n}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => (o.freeText ? setTyping(o.n) : send(o.n))}
+                  className={cn(
+                    "flex flex-col items-start gap-[2px] rounded-[9px] border border-border bg-[var(--surface)] px-3 py-2 text-left",
+                    "enabled:hover:border-[var(--brand)] disabled:opacity-55",
+                  )}
+                >
+                  <span className="text-[13px] font-[550] text-[var(--text)]">
+                    {o.n}. {o.label}
+                  </span>
+                  {o.detail && <span className="text-[12px] leading-[1.4] text-[var(--text-2)]">{o.detail}</span>}
+                </button>
+              ),
+            )}
+          </div>
+          {sent && (
+            <p role="status" className="m-0 mt-3 text-[12px] text-[var(--text-2)]">
+              Sent. Waiting for the run to show its next step…
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="m-0 mb-2 text-[12.5px] text-[var(--text-2)]">
+          Scotty can&rsquo;t read any choices on this screen. Answer it in a terminal with{" "}
+          <CopyableId id={`claude attach ${run.id}`} className="font-mono text-[12px]" />.
+        </p>
+      )}
+
+      {readOnly && (
+        <p className="m-0 mt-3 text-[12px] text-[var(--text-2)]">
+          Read Only Mode is on, so answering is turned off. Use the banner at the top to enable editing.
+        </p>
+      )}
+
+      {screen && (
+        <details className="mt-3" open={!prompt}>
+          <summary className="cursor-pointer text-[12px] text-[var(--text-3)]">The run&rsquo;s screen</summary>
+          <pre className="bd-scroll m-0 mt-2 max-h-[320px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11.5px] leading-[1.5] text-[var(--text)]">
+            {screen}
+          </pre>
+        </details>
+      )}
+      <p className="m-0 mt-3 text-[11.5px] text-[var(--text-3)]">
+        To talk it through instead of choosing, attach in a terminal:{" "}
+        <CopyableId id={`claude attach ${run.id}`} className="font-mono text-[11.5px]" />
+      </p>
+    </section>
+  );
+}
+
+/** A waiting run that reads its own question, for lists like Needs You. */
+export function WaitingGoalRun({ run }: { run: GoalRun }) {
+  const { projectId } = useApp();
+  const { data, error, isLoading } = useGoalFeed(projectId, run.id, true);
+  if (error) {
+    return (
+      <p role="alert" className="m-0 rounded-[12px] border border-border p-4 text-[12.5px] text-[var(--text-2)]">
+        Goal run {run.id} is waiting on you, but its screen could not be read: {(error as Error).message}
+      </p>
+    );
+  }
+  if (isLoading || !data) {
+    return (
+      <p className="m-0 rounded-[12px] border border-border p-4 text-[12.5px] text-[var(--text-3)]">
+        Reading goal run {run.id}&rsquo;s question…
+      </p>
+    );
+  }
+  return <GoalQuestion run={data.run} prompt={data.prompt} screen={data.screen} />;
+}

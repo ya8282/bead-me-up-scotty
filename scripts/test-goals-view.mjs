@@ -75,8 +75,10 @@ try {
   await output.getByText('claude attach ab12cd34').first().waitFor();
 
   // Blocked: the question is readable here, not only in a terminal.
-  const ask = output.getByRole('region', { name: 'Waiting on you' });
+  // No choices could be parsed from this screen, so it is shown as-is.
+  const ask = output.getByRole('region', { name: 'Goal run ab12cd34 is asking' });
   await ask.getByText('❯ 1. Close the sheet', { exact: false }).waitFor();
+  await ask.getByText('can’t read any choices', { exact: false }).waitFor();
 
   // Live: new output arrives without a reload.
   feeds.ab12cd34.items.push({ id: '4', at: at(4), source: 'main', kind: 'text', text: 'Answer received, carrying on.' });
@@ -85,7 +87,7 @@ try {
   // Picking an earlier run shows its feed, and nothing is waiting there.
   await runButtons.nth(1).click();
   await output.getByText('All done.').waitFor();
-  assert.equal(await output.getByRole('region', { name: 'Waiting on you' }).count(), 0);
+  assert.equal(await output.getByRole('region', { name: /is asking$/ }).count(), 0);
   assert.equal(await output.getByText('Four beads need a decision.').count(), 0);
 
   // No runs at all: say how to start one.

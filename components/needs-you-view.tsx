@@ -1,6 +1,8 @@
 "use client";
 import * as React from "react";
 import { GateApproval } from "@/components/gate-approval";
+import { WaitingGoalRun } from "@/components/goal-question";
+import { useGoalRuns } from "@/hooks/use-goal";
 import { useApp } from "@/components/app-context";
 import { useRespondHuman, useDismissHuman } from "@/hooks/use-beads";
 import { Icon, typeIconName } from "@/components/icons";
@@ -26,15 +28,19 @@ import type { Bead } from "@/lib/schema";
  *   2. Human-approval gates (`bd gate create --type human`) whose blockers are
  *      resolved — approved (closed, which unblocks dependents) from here so they
  *      don't sit invisibly waiting on the board (bead 8qc / gh-6).
+ *   3. Claude Code goal runs stopped on a question or permission prompt, answered
+ *      here without attaching a terminal. Listed first: a whole run is blocked.
  */
 export function NeedsYouView() {
-  const { beads, index } = useApp();
+  const { beads, index, projectId, meta } = useApp();
+  const runs = useGoalRuns(projectId, meta?.kind === "bd").data?.runs;
+  const waiting = React.useMemo(() => (runs ?? []).filter((r) => r.state === "blocked"), [runs]);
   const inbox = React.useMemo(() => beads.filter(needsHuman), [beads]);
   const gates = React.useMemo(
     () => beads.filter((b) => readyHumanGate(b, index)),
     [beads, index],
   );
-  const total = inbox.length + gates.length;
+  const total = waiting.length + inbox.length + gates.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -51,10 +57,14 @@ export function NeedsYouView() {
             🎉 Nothing needs you right now. Agents flag beads here with{" "}
             <span className="font-mono">bd human</span>, and human-approval gates
             (<span className="font-mono">bd gate create --type human</span>) show
-            up once their blockers clear.
+            up once their blockers clear, and goal runs appear when they stop to
+            ask you something.
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            {waiting.map((r) => (
+              <WaitingGoalRun key={r.id} run={r} />
+            ))}
             {gates.map((g) => (
               <GateCard key={g.id} gate={g} />
             ))}

@@ -50,11 +50,36 @@ export interface GoalFeedItem {
   kind: "command" | "prompt" | "text" | "tool";
   text: string;
 }
+/** One choice in a waiting run's question, numbered as the terminal numbers it. */
+export interface GoalPromptOption {
+  n: number;
+  label: string;
+  detail: string;
+  /** "Type something": choosing it means sending typed text as the answer. */
+  freeText: boolean;
+}
+/** The question a waiting run is showing, read from its screen. */
+export interface GoalPrompt {
+  /** Identifies this exact question; an answer naming a stale key is refused. */
+  key: string;
+  /** The question tabs of a multi-question prompt, e.g. "← ☐ Color ☐ Size ✔ Submit →". */
+  tabs: string;
+  question: string;
+  options: GoalPromptOption[];
+  screen: string;
+}
 export interface GoalFeedResponse {
   run: GoalRun;
   items: GoalFeedItem[];
   /** The latest terminal screen, only while the run is blocked waiting on a person. */
   screen: string | null;
+  /** The same screen as a question with choices, when it has one. */
+  prompt: GoalPrompt | null;
+}
+export interface GoalAnswer {
+  key: string;
+  option: number;
+  text?: string;
 }
 
 export interface ActivityItem {
@@ -256,6 +281,11 @@ export const api = {
     list: (projectId: string) => request<GoalRunsResponse>(`${base(projectId)}/goal`),
     feed: (projectId: string, runId: string) =>
       request<GoalFeedResponse>(`${base(projectId)}/goal/${enc(runId)}`),
+    answer: (projectId: string, runId: string, answer: GoalAnswer) =>
+      request<{ ok: true }>(`${base(projectId)}/goal/${enc(runId)}`, {
+        method: "POST",
+        body: JSON.stringify(answer),
+      }),
     start: (projectId: string, ids: string[]) =>
       request<GoalStartResponse>(`${base(projectId)}/goal`, {
         method: "POST",

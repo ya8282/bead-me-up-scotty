@@ -78,8 +78,15 @@ for AI agents.
   (`CLAUDE_BIN` overrides).
 - **Goals view** — watch goal runs without leaving Scotty (sidebar, or `G` then
   `W`). It lists the project's runs and shows a live feed of the selected one,
-  merged from its own transcript and its subagents'. When a run is waiting on
-  you, its latest screen shows the question it's asking.
+  merged from its own transcript and its subagents'.
+- **Answer waiting runs from Needs You** — when a goal run stops on a question
+  or a permission prompt, it appears at the top of **Needs You** (and in the
+  Goals view) with its choices as buttons; "Type something" choices take typed
+  text. Claude Code has no command for sending input to a background session,
+  so Scotty reads the question by replaying `claude logs` through a terminal
+  emulator and answers by typing into `claude attach` in a pseudo-terminal. An
+  answer names the exact question it was given for and is refused if the run
+  has moved on. Needs `python3` on `PATH`; Read Only Mode turns it off.
 - **Dependencies & graph** — view/add/remove typed dependencies in the detail
   drawer, plus an interactive React Flow dependency graph (drag node→node to link).
 - **Comments** — author-stamped comment threads with a composer on every bead.
@@ -333,6 +340,7 @@ POSTHOG_KEY='' BEADS_DEMO=1 SCOTTY_READ_ONLY=1 npm run start -- --port 3198
 SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-grouping.mjs
 SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-selection.mjs
 SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-goals-view.mjs
+SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-goal-answer.mjs
 ```
 
 ## License

@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { toastError } from "@/components/error-toast";
-import { api } from "@/lib/api-client";
+import { api, type GoalAnswer } from "@/lib/api-client";
 import { useApp } from "@/components/app-context";
 import { beadsKey } from "./use-beads";
 
@@ -35,6 +35,23 @@ export function useGoalFeed(projectId: string, runId: string | null, live: boole
     enabled: !!runId,
     refetchInterval: live ? 3000 : false,
     retry: false,
+  });
+}
+
+/** Answer the question a waiting run is showing. */
+export function useAnswerGoal() {
+  const { projectId } = useApp();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, answer }: { runId: string; answer: GoalAnswer }) =>
+      api.goal.answer(projectId, runId, answer),
+    onSuccess: (_res, { runId }) => {
+      toast.success(`Answered goal run ${runId}`);
+      qc.invalidateQueries({ queryKey: goalKey(projectId) });
+      // The session takes a moment to repaint its next step; read it again then.
+      setTimeout(() => qc.invalidateQueries({ queryKey: goalKey(projectId) }), 2000);
+    },
+    onError: (err) => toastError(err),
   });
 }
 

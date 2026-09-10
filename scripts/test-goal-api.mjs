@@ -33,6 +33,29 @@ const stub = path.join(tmp, "claude");
 
 fs.writeFileSync(stateFile, "[]");
 
+// What a waiting run's terminal emits: a question repainted the way the TUI
+// does it, at 100 columns (the width of its rules). Row 9's label is placed by
+// absolute cursor position, so only a real terminal emulator reads it as
+// "2. Blue"; stripping escapes would leave "Blue" on a line of its own.
+const rule = "─".repeat(100);
+const SCREEN = [
+  "\x1b[2J\x1b[H",
+  "✻ thinking with high effort\r\n",
+  `${rule}\r\n`,
+  "←  ☐ Color  ☐ Size  ✔ Submit  →\r\n",
+  "\r\n",
+  "Pick a color\r\n",
+  "\r\n",
+  "❯ 1. Red\r\n",
+  "     Warm and loud\r\n",
+  "  2.\x1b[9;6HBlue\r\n",
+  "  3. Type something.\r\n",
+  `${rule}\r\n`,
+  "  4. Chat about this\r\n",
+  "\r\n",
+  "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+].join("");
+
 // The run's transcripts, where Claude Code keeps them: its own under some
 // project folder, and one per subagent beside it. Only what a person watching
 // needs should come out; tool results and meta entries must not.
@@ -71,10 +94,21 @@ if (args[0] === "agents") {
   console.log(JSON.stringify(read()));
   process.exit(0);
 }
-if (args[0] === "logs") {
-  // A redrawn terminal: spaces as cursor-forward, rows as cursor jumps.
-  process.stdout.write("\\x1b[2J\\x1b[1;1H✻ thinking with high effort\\x1b[2;1H──────────────────────\\x1b[3;1HWhich\\x1b[1Cfix\\x1b[1Cshould\\x1b[1Cwe\\x1b[1Cuse?\\x1b[4;1H❯ 1. Close the sheet\\x1b[5;1H  2. Raise the scrim\\x1b[6;1Hab\\n");
-  process.exit(0);
+if (args[0] === "logs") { process.stdout.write(${JSON.stringify(SCREEN)}); process.exit(0); }
+if (args[0] === "attach") {
+  // Stands in for the real TUI: paint the question, take raw keys, record
+  // them, and leave on Ctrl+Z the way claude attach does.
+  process.stdout.write(${JSON.stringify(SCREEN)});
+  process.stdin.setRawMode(true);
+  let keys = "";
+  process.stdin.on("data", (d) => {
+    const s = d.toString();
+    const stop = s.indexOf("\\x1a");
+    keys += stop === -1 ? s : s.slice(0, stop);
+    fs.writeFileSync(STATE + ".keys", keys);
+    if (stop !== -1) process.exit(0);
+  });
+  return;
 }
 if (args[0] === "--bg") {
   const id = "ab12cd34";
@@ -199,8 +233,8 @@ try {
   const projectsRoot = path.join(os.homedir(), "Documents", "Projects");
   const rel = path.relative(projectsRoot, PROJECT);
   const name = rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep)[0] : null;
-  const prompt = JSON.parse(fs.readFileSync(stateFile, "utf8"))[0].name;
-  assert.equal(prompt, ["/goal", ...(name ? [name] : []), task.id].join(" "), "prompt names the project first");
+  const sentPrompt = JSON.parse(fs.readFileSync(stateFile, "utf8"))[0].name;
+  assert.equal(sentPrompt, ["/goal", ...(name ? [name] : []), task.id].join(" "), "prompt names the project first");
   assert.equal(fs.readFileSync(stateFile + ".cwd", "utf8"),
     name ? path.join(projectsRoot, name) : PROJECT, "lock scans the whole project folder");
 
@@ -230,12 +264,44 @@ try {
     "merged feed in time order",
   );
   assert.ok(!JSON.stringify(feed.body).includes("SECRET TOOL OUTPUT"), "tool results stay out of the feed");
-  // Blocked: the pending question lives only on screen, so the screen comes too.
-  assert.match(feed.body.screen, /Which fix should we use\?/, "cursor moves become spaces");
-  assert.match(feed.body.screen, /2\. Raise the scrim/, "each row on its own line");
-  assert.doesNotMatch(feed.body.screen, /^ab$/m, "spinner fragments are dropped");
-  assert.doesNotMatch(feed.body.screen, /thinking with high effort/, "status redraws above the prompt rule are dropped");
-  assert.match(feed.body.screen, /^─{10,}/, "the screen starts at the prompt area");
+  // Blocked: the pending question lives only on screen, so it is read from
+  // there as data, through a terminal emulator at the session's own width.
+  const prompt = feed.body.prompt;
+  assert.ok(prompt, `a question is parsed: ${JSON.stringify(feed.body.screen)}`);
+  assert.match(prompt.key, /^[0-9a-f]{16}$/);
+  assert.equal(prompt.tabs, "←  ☐ Color  ☐ Size  ✔ Submit  →");
+  assert.equal(prompt.question, "Pick a color");
+  assert.deepEqual(
+    prompt.options.map((o) => [o.n, o.label, o.detail, o.freeText]),
+    [
+      [1, "Red", "Warm and loud", false],
+      [2, "Blue", "", false], // placed by cursor position, read back in place
+      [3, "Type something.", "", true],
+    ],
+    "numbered choices, with 'Chat about this' left to a terminal",
+  );
+  assert.match(feed.body.screen, /^─{40}\n/, "the screen starts at the prompt area");
+  assert.doesNotMatch(feed.body.screen, /thinking with high effort/, "spinner lines above it are dropped");
+
+  // Answering: the option's number goes into the live session through a pty.
+  const keysFile = stateFile + ".keys";
+  const answer = (body) => json("POST", `/api/p/${pid}/goal/ab12cd34`, body);
+  const picked = await answer({ key: prompt.key, option: 2 });
+  assert.equal(picked.status, 200, `answer: ${JSON.stringify(picked.body)}`);
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "2", "pressed 2 and nothing else");
+
+  // Typed answers: number, text, Enter. Control characters never become keys.
+  const typed = await answer({ key: prompt.key, option: 3, text: "Medium\nplease\x1b[A" });
+  assert.equal(typed.status, 200, `typed answer: ${JSON.stringify(typed.body)}`);
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "3Medium please [A\r", "newlines and escapes are neutralised");
+
+  fs.writeFileSync(keysFile, "untouched");
+  const stale = await answer({ key: "0000000000000000", option: 2 });
+  assert.equal(stale.status, 409, "an answer to a question no longer showing is refused");
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "and nothing was typed");
+  assert.equal((await answer({ key: prompt.key, option: 4 })).status, 400, "only the parsed choices are answerable");
+  assert.equal((await answer({ key: prompt.key, option: 3 })).status, 400, "a typed choice needs text");
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "refusals type nothing");
 
   // Only this project's runs are readable, and ids never become paths.
   const stranger = await json("GET", `/api/p/${pid}/goal/ffffffff`);
@@ -251,6 +317,10 @@ try {
   assert.equal(free.body.runs.length, 1, "the finished run is still listed");
   const finished = await json("GET", `/api/p/${pid}/goal/ab12cd34`);
   assert.equal(finished.body.screen, null, "no screen once nothing is waiting");
+  assert.equal(finished.body.prompt, null, "and no question");
+  const late = await json("POST", `/api/p/${pid}/goal/ab12cd34`, { key: prompt.key, option: 1 });
+  assert.equal(late.status, 409, "a run that is not waiting cannot be answered");
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "and nothing was typed");
   assert.equal(finished.body.items.length, 6, "a finished run's feed stays readable");
 
   console.log("test-goal-api: all checks passed");

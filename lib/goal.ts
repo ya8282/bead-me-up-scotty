@@ -1,4 +1,6 @@
 import "server-only";
+import os from "node:os";
+import path from "node:path";
 import { AiError, CLAUDE_BIN, isClaudeAvailable, runClaudeCli } from "./ai";
 import { MAX_GOAL_BEADS, type GoalRun } from "./api-client";
 
@@ -27,6 +29,27 @@ export type { GoalRun };
  */
 const TERMINAL_STATES = new Set(["done"]);
 
+const PROJECTS_ROOT = path.join(os.homedir(), "Documents", "Projects");
+
+/**
+ * The project `/goal` works in. `/goal [project-name] [bead-id ...]` resolves
+ * ~/Documents/Projects/<name> and then prefers a nested repo/, so the name is
+ * what it expects first; sent without it, the first bead id would be read as
+ * the project and dropped from the set.
+ *
+ * `root` is where a run can start from: the project folder, which may sit one
+ * level above the repo (…/oculist while the repo is …/oculist/repo). The lock
+ * scans that whole folder, or a run started from the parent would go unseen.
+ * ponytail: outside ~/Documents/Projects there is no name to send and the root
+ * is the repo itself; widen this if /goal learns other layouts.
+ */
+export function goalProject(repoPath: string): { name: string | null; root: string } {
+  const rel = path.relative(PROJECTS_ROOT, repoPath);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return { name: null, root: repoPath };
+  const name = rel.split(path.sep)[0];
+  return { name, root: path.join(PROJECTS_ROOT, name) };
+}
+
 function parseAgents(stdout: string): unknown[] {
   try {
     const parsed = JSON.parse(stdout);
@@ -36,9 +59,10 @@ function parseAgents(stdout: string): unknown[] {
   }
 }
 
-/** Every background session for this repo, newest first. */
+/** Every background session started anywhere in this repo's project folder, newest first. */
 export async function listGoals(repoPath: string): Promise<GoalRun[]> {
-  const stdout = await runClaudeCli(["agents", "--json", "--all", "--cwd", repoPath], 20_000);
+  const { root } = goalProject(repoPath);
+  const stdout = await runClaudeCli(["agents", "--json", "--all", "--cwd", root], 20_000);
   return parseAgents(stdout)
     .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
     .filter((s) => s.kind === "background" && typeof s.id === "string")
@@ -92,7 +116,9 @@ export async function startGoal(repoPath: string, ids: string[]): Promise<GoalRu
     );
   }
 
-  const stdout = await runClaudeCli(["--bg", `/goal ${ids.join(" ")}`], 60_000, repoPath);
+  const { name } = goalProject(repoPath);
+  const prompt = ["/goal", ...(name ? [name] : []), ...ids].join(" ");
+  const stdout = await runClaudeCli(["--bg", prompt], 60_000, repoPath);
   const id = stdout.match(/\b[0-9a-f]{8}\b/)?.[0];
   if (!id) throw new AiError("Claude did not report a background session id.", "bad_output");
 

@@ -17,6 +17,30 @@ export interface BeadsResponse {
   meta: Meta;
 }
 
+/** /goal stops itself after this many closed beads, so a larger set cannot be honoured. */
+export const MAX_GOAL_BEADS = 20;
+
+/** A Claude Code `/goal` background session, as `claude agents --json` reports it. */
+export interface GoalRun {
+  id: string;
+  cwd: string;
+  /** "done" once finished, "blocked" while waiting on a permission prompt. */
+  state: string;
+  startedAt: number;
+  sessionId?: string;
+  name?: string;
+  live: boolean;
+}
+export interface GoalRunsResponse {
+  runs: GoalRun[];
+  /** The run holding the working tree, if any. Only one can be live at a time. */
+  active: GoalRun | null;
+}
+export interface GoalStartResponse {
+  run: GoalRun;
+  ids: string[];
+}
+
 export interface ActivityItem {
   id: string;
   issueId: string;
@@ -209,6 +233,17 @@ export const api = {
 
   assist: (projectId: string, id: string) =>
     request<AssistResult>(`${base(projectId)}/beads/${enc(id)}/assist`, { method: "POST" }),
+
+  // Claude Code `/goal` runs. One live run per project — the server refuses a
+  // second while one holds the working tree.
+  goal: {
+    list: (projectId: string) => request<GoalRunsResponse>(`${base(projectId)}/goal`),
+    start: (projectId: string, ids: string[]) =>
+      request<GoalStartResponse>(`${base(projectId)}/goal`, {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+  },
 
   // Act on a "Needs You" (human-labelled) bead, mirroring `bd human`.
   human: {

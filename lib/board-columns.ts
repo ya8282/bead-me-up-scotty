@@ -1,5 +1,5 @@
 import type { Bead } from "./schema";
-import { isBlocked } from "./beads-view";
+import { isBlocked, parentOf } from "./beads-view";
 
 /**
  * The board's column model — shared by the Board (Kanban) and List views so they
@@ -70,4 +70,57 @@ export function sortBoardCards(
 /** Preserve saved manual order, falling back to priority for unranked cards. */
 export function sortByOrder(cards: Bead[], order?: string[]): Bead[] {
   return sortBoardCards(cards, "manual", order);
+}
+
+/** One board row: the same columns, restricted to one parent's children. */
+export interface BoardGroup {
+  /** Parent bead id, or "none" for beads with no parent. */
+  key: string;
+  label: string;
+  /** Ids a goal run would work: everything in the row that is not closed. */
+  runnableIds: string[];
+  columns: { col: BoardColumn; cards: Bead[] }[];
+}
+
+/**
+ * Split already-built columns into one row per parent bead, preserving each
+ * column's order. Keyed on the parent-child EDGE via parentOf(), so it agrees
+ * with the drawer and the epic graph rather than re-deriving the hierarchy.
+ *
+ * Epics are filtered out of the board upstream, so a parent only ever appears
+ * as a row label here, never as a card. Rows whose beads are all closed are
+ * dropped: the point of grouping is seeing what is left in an epic.
+ */
+export function groupColumnsByParent(
+  columns: { col: BoardColumn; cards: Bead[] }[],
+  index: Map<string, Bead>,
+): BoardGroup[] {
+  const groups = new Map<string, BoardGroup>();
+  for (const [columnIndex, { cards }] of columns.entries()) {
+    for (const bead of cards) {
+      const parent = parentOf(bead, index);
+      const key = parent?.id ?? "none";
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          label: parent ? parent.title : "No epic",
+          runnableIds: [],
+          columns: columns.map((c) => ({ col: c.col, cards: [] as Bead[] })),
+        };
+        groups.set(key, group);
+      }
+      group.columns[columnIndex].cards.push(bead);
+      if (bead.status !== "closed") group.runnableIds.push(bead.id);
+    }
+  }
+  return [...groups.values()]
+    .filter((g) => g.runnableIds.length > 0)
+    .sort(
+      (a, b) =>
+        // Parentless work last, then alphabetical, then by id for stability.
+        Number(a.key === "none") - Number(b.key === "none") ||
+        a.label.localeCompare(b.label) ||
+        a.key.localeCompare(b.key),
+    );
 }

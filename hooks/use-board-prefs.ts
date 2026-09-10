@@ -5,13 +5,16 @@ import type { UpdateChannel } from "@/lib/update-types";
 const PREFS_KEY = "bmus.board";
 const EVENT = "bmus.board.changed";
 export type BlockedColumnMode = "auto" | "always";
+/** Board rows: one flat set of columns, or one set per parent epic. */
+export type BoardGroupMode = "none" | "epic";
 export interface BoardPrefs {
   blockedColumn: BlockedColumnMode;
   sortMode: BoardSortMode;
+  groupBy: BoardGroupMode;
   checkUpdates: boolean;
   updateChannel: UpdateChannel;
 }
-const DEFAULTS: BoardPrefs = { blockedColumn: "auto", sortMode: "manual", checkUpdates: true, updateChannel: "stable" };
+const DEFAULTS: BoardPrefs = { blockedColumn: "auto", sortMode: "manual", groupBy: "none", checkUpdates: true, updateChannel: "stable" };
 function snapshot() {
   try { return globalThis.localStorage?.getItem(PREFS_KEY) || ""; } catch { return ""; }
 }
@@ -20,6 +23,7 @@ function parse(raw: string): BoardPrefs {
     const stored = JSON.parse(raw || "{}");
     return { blockedColumn: stored?.blockedColumn === "always" ? "always" : "auto",
       sortMode: ["priority", "updated", "manual"].includes(stored?.sortMode) ? stored.sortMode : "manual",
+      groupBy: stored?.groupBy === "epic" ? "epic" : "none",
       checkUpdates: typeof stored?.checkUpdates === "boolean" ? stored.checkUpdates : true,
       updateChannel: stored?.updateChannel === "development" ? "development" : "stable" };
   } catch { return DEFAULTS; }

@@ -1,5 +1,6 @@
 import "server-only";
 import { AiError, CLAUDE_BIN, isClaudeAvailable, runClaudeCli } from "./ai";
+import { MAX_GOAL_BEADS, type GoalRun } from "./api-client";
 
 /**
  * Launch and inspect Claude Code `/goal` runs as background sessions.
@@ -15,17 +16,8 @@ import { AiError, CLAUDE_BIN, isClaudeAvailable, runClaudeCli } from "./ai";
  * live; the caller surfaces that rather than queueing behind it.
  */
 
-/** A `/goal` background session as `claude agents --json` reports it. */
-export interface GoalRun {
-  id: string;
-  cwd: string;
-  /** Observed: "done" once finished, "blocked" while waiting on a permission prompt. */
-  state: string;
-  startedAt: number;
-  sessionId?: string;
-  name?: string;
-  live: boolean;
-}
+export { MAX_GOAL_BEADS };
+export type { GoalRun };
 
 /**
  * States that release the lock. Only "done" is confirmed terminal, so anything
@@ -34,9 +26,6 @@ export interface GoalRun {
  * ponytail: widen this set as new terminal states are observed, never by guessing.
  */
 const TERMINAL_STATES = new Set(["done"]);
-
-/** /goal stops itself after 20 closed beads, so a larger set cannot be honoured. */
-export const MAX_GOAL_BEADS = 20;
 
 function parseAgents(stdout: string): unknown[] {
   try {
@@ -97,7 +86,8 @@ export async function startGoal(repoPath: string, ids: string[]): Promise<GoalRu
   if (live) {
     throw new AiError(
       `Goal run ${live.id} is already active in this project (${live.state}). ` +
-        `It owns the working tree until it finishes, so only one run can go at a time.`,
+        `It owns the working tree until it finishes. Run "claude attach ${live.id}" ` +
+        `to take it over, or "claude stop ${live.id}" to end it.`,
       "goal_run_active",
     );
   }

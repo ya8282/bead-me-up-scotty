@@ -67,6 +67,15 @@ for AI agents.
   labels, parent epic, start-in-backlog) and edit status/priority inline.
 - **Epics & progress** — epics with live `closed ÷ children` progress bars and
   expandable child lists; add a child straight into an epic.
+- **Group the board by epic** — one row of columns per parent, with rows whose
+  beads are all closed hidden. It's a saved preference, so the flat board stays
+  the default.
+- **Goal runs** — hand a set of beads to one Claude Code `/goal` background
+  session: **Run goal** on an epic row, or **Select** several beads (tap to pick,
+  built for touch) and launch the selection. One run per project at a time,
+  because `claude --bg` shares the working tree; a banner names the live run and
+  the `claude attach <id>` command for it. Needs the `claude` CLI on `PATH`
+  (`CLAUDE_BIN` overrides).
 - **Dependencies & graph** — view/add/remove typed dependencies in the detail
   drawer, plus an interactive React Flow dependency graph (drag node→node to link).
 - **Comments** — author-stamped comment threads with a composer on every bead.
@@ -304,6 +313,21 @@ components/           # sidebar, board (dnd), detail drawer, create modal, epics
 ```bash
 npm run build         # typecheck + production build
 npm run lint          # eslint
+```
+
+The goal-run API check boots its own dev server against a stubbed `claude`, so it
+never starts a real run:
+
+```bash
+node scripts/test-goal-api.mjs
+```
+
+The board browser checks share one isolated server:
+
+```bash
+POSTHOG_KEY='' BEADS_DEMO=1 SCOTTY_READ_ONLY=1 npm run start -- --port 3198
+SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-grouping.mjs
+SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-selection.mjs
 ```
 
 ## License

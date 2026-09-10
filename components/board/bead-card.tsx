@@ -6,6 +6,7 @@ import type { Bead } from "@/lib/schema";
 import { Icon, typeIconName } from "@/components/icons";
 import { useApp } from "@/components/app-context";
 import { CopyableId } from "@/components/copyable-id";
+import { Checkbox } from "@/components/ui/checkbox";
 import { beadOrigin, originTitle } from "@/lib/attribution";
 import {
   catColor,
@@ -21,12 +22,37 @@ import {
   checklistProgress,
 } from "@/lib/beads-view";
 
-export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: number }) {
+export function BeadCard({
+  bead,
+  childCount = 0,
+  selectable = false,
+  selected = false,
+  onSelectToggleAction,
+}: {
+  bead: Bead;
+  childCount?: number;
+  /** Select mode: tapping the card picks it for a goal run instead of opening it. */
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectToggleAction?: (id: string) => void;
+}) {
   const { index, humanAllowlist, openDetail, readOnly, selectedBeadId, selectBead } = useApp();
+  // Dragging is off in select mode: on touch, dnd-kit already owns the press,
+  // so leaving it on would make every selection tap a potential drag.
+  const dragDisabled = readOnly || selectable;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: bead.id,
-    disabled: readOnly,
+    disabled: dragDisabled,
   });
+
+  const activate = () => {
+    if (selectable) {
+      onSelectToggleAction?.(bead.id);
+      return;
+    }
+    selectBead(bead.id);
+    openDetail(bead.id);
+  };
 
   const o = beadOrigin(bead, humanAllowlist);
   const parent = parentOf(bead, index);
@@ -39,19 +65,19 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
   return (
     <article
       ref={setNodeRef}
-      {...listeners}
-      {...(readOnly ? { role: "button", tabIndex: 0 } : attributes)}
-      {...(readOnly ? { onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
+      {...(dragDisabled ? {} : listeners)}
+      {...(dragDisabled
+        // aria-pressed rides with role="button"; article itself does not support it.
+        ? { role: "button", tabIndex: 0, "aria-pressed": selectable ? selected : undefined }
+        : attributes)}
+      {...(dragDisabled ? { onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
         if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(bead.id); }
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
       } } : {})}
       data-keyboard-bead-id={bead.id}
       aria-current={selectedBeadId === bead.id ? "true" : undefined}
       onFocus={() => selectBead(bead.id)}
-      onClick={() => {
-        selectBead(bead.id);
-        openDetail(bead.id);
-      }}
+      onClick={activate}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -59,12 +85,25 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
         zIndex: isDragging ? 10 : undefined,
       }}
       className={`flex cursor-pointer touch-none flex-col gap-[9px] rounded-[11px] border bg-[var(--surface)] p-[12px_13px] shadow-[var(--shadow)] transition-[border-color] hover:border-2 hover:p-[11px_12px] focus-visible:outline-none ${
-        selectedBeadId === bead.id
-          ? "border-[var(--brand)] hover:border-[var(--text-3)] ring-2 ring-[var(--brand)]/30"
-          : "border-border hover:border-[var(--text-3)]"
+        selected
+          ? "border-[var(--brand)] ring-2 ring-[var(--brand)]/50"
+          : selectedBeadId === bead.id
+            ? "border-[var(--brand)] hover:border-[var(--text-3)] ring-2 ring-[var(--brand)]/30"
+            : "border-border hover:border-[var(--text-3)]"
       }`}
     >
       <div className="flex items-center gap-2">
+        {selectable && (
+          // Decorative: the whole card is the control, so the box must not take
+          // its own click and toggle the selection twice.
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => {}}
+            aria-hidden
+            tabIndex={-1}
+            className="pointer-events-none flex-shrink-0"
+          />
+        )}
         <span
           className="h-2 w-2 flex-shrink-0 rounded-full"
           style={{ background: catColor(bead.status) }}

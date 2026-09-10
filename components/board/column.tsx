@@ -22,6 +22,9 @@ export function Column({
   manualSort = true,
   dropId,
   grouped = false,
+  selectMode = false,
+  selectedIds,
+  onSelectToggleAction,
 }: {
   col: ColumnDef;
   cards: Bead[];
@@ -29,6 +32,9 @@ export function Column({
   childCounts?: Map<string, number>;
   control?: React.ReactNode;
   manualSort?: boolean;
+  selectMode?: boolean;
+  selectedIds?: Set<string>;
+  onSelectToggleAction?: (id: string) => void;
   /**
    * Droppable id, when the same column is rendered more than once (one row per
    * epic). Droppable ids must be unique, so grouped rows namespace theirs.
@@ -68,7 +74,16 @@ export function Column({
       >
         <SortableContext items={cards.map((b) => b.id)} strategy={manualSort ? verticalListSortingStrategy : () => null}>
           {cards.map((b) => (
-            <BeadCard key={b.id} bead={b} childCount={childCounts?.get(b.id) ?? 0} />
+            <BeadCard
+              key={b.id}
+              bead={b}
+              childCount={childCounts?.get(b.id) ?? 0}
+              // A closed bead has no work left, so it stays openable rather
+              // than selectable even while select mode is on.
+              selectable={selectMode && b.status !== "closed"}
+              selected={selectedIds?.has(b.id) ?? false}
+              onSelectToggleAction={onSelectToggleAction}
+            />
           ))}
         </SortableContext>
         {cards.length === 0 && (

@@ -1,6 +1,6 @@
 // Board grouping by epic, and the per-epic Run goal action.
 // Run only against an isolated demo server with telemetry disabled:
-//   XDG_CONFIG_HOME=/tmp/scotty-grouping POSTHOG_KEY='' BEADS_DEMO=1 npm run start -- --port 3198
+//   XDG_CONFIG_HOME=/tmp/scotty-grouping POSTHOG_KEY='' BEADS_DEMO=1 SCOTTY_READ_ONLY=1 npm run start -- --port 3198
 //   SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-grouping.mjs
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
@@ -48,6 +48,11 @@ try {
     } } });
     return route.fulfill({ json: beads.find(b => path.endsWith(`/beads/${b.id}`)) ?? {} });
   });
+
+  // The documented isolated server starts read-only; unlock this browser session
+  // only, the way the board sorting checks do.
+  const unlock = await page.context().request.put(`${base}/api/viewer-mode`, { data: { readOnly: false } });
+  assert.equal(unlock.status(), 200, 'isolated demo can be unlocked for mutation assertions');
 
   await page.goto(`${base}/p/demo?view=board`);
   const group = page.getByRole('combobox', { name: 'Group board rows' });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runnable check for the goal-run API: `node scripts/goal-api-check.mjs`
+ * Runnable check for the goal-run API: `node scripts/test-goal-api.mjs`
  *
  * Boots `next dev` against a throwaway XDG_CONFIG_HOME (so the real project
  * list is untouched) with CLAUDE_BIN pointed at a stub, then asserts the paths
@@ -27,7 +27,7 @@ function beadsRoot(from) {
 const PROJECT = beadsRoot(REPO);
 const PORT = 34567;
 const BASE = `http://127.0.0.1:${PORT}`;
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "goal-api-check-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "test-goal-api-"));
 const stateFile = path.join(tmp, "sessions.json");
 const stub = path.join(tmp, "claude");
 
@@ -144,7 +144,7 @@ try {
   assert.equal(free.body.active, null, "a done run releases the lock");
   assert.equal(free.body.runs.length, 1, "the finished run is still listed");
 
-  console.log("goal-api-check: 8/8 passed");
+  console.log("test-goal-api: 8/8 passed");
 } catch (e) {
   failure = e;
 } finally {

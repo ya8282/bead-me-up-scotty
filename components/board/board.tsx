@@ -121,6 +121,33 @@ export function Board() {
   const { data: goalData } = useGoalRuns(projectId, !readOnly);
   const activeRun = goalData?.active ?? null;
 
+  // Select mode is the touch-first way to build a goal set: tapping a card picks
+  // it instead of opening it, and dragging is off while it is on.
+  const [selectMode, setSelectMode] = React.useState(false);
+  const [selectedIds, setSelectedIds] = React.useState<ReadonlySet<string>>(new Set());
+  const toggleSelected = React.useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+  const leaveSelectMode = React.useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+  // Beads can disappear from view (filters, a status change, another writer), and
+  // a set holding ids the board no longer shows would submit invisible work.
+  const selectedVisible = React.useMemo(
+    () => visible.filter((b) => selectedIds.has(b.id)).map((b) => b.id),
+    [visible, selectedIds],
+  );
+  const selectProps = {
+    selectMode,
+    selectedIds: selectedIds as Set<string>,
+    onSelectToggleAction: toggleSelected,
+  };
+
   // Which column each visible bead currently sits in (drag targets resolve here).
   const colOfBead = React.useMemo(() => {
     const m = new Map<string, string>();
@@ -237,6 +264,24 @@ export function Board() {
 
         {!readOnly && (
           <button
+            type="button"
+            aria-pressed={selectMode}
+            onClick={() => (selectMode ? leaveSelectMode() : setSelectMode(true))}
+            title="Pick several beads to hand to one goal run"
+            className={cn(
+              "flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] border px-[12px] text-[12.5px] font-[550]",
+              selectMode
+                ? "border-[var(--brand)] bg-[var(--brand-weak)] text-[var(--brand)]"
+                : "border-border bg-[var(--surface-2)] text-[var(--text-2)]",
+            )}
+          >
+            <Icon name="check" size={14} />
+            <span>Select</span>
+          </button>
+        )}
+
+        {!readOnly && (
+          <button
             onClick={() => openCreate()}
             className="flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-white"
             style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
@@ -269,7 +314,11 @@ export function Board() {
         {loading && beads.length === 0 ? (
           <div className="text-[13px] text-[var(--text-3)]">Loading beads…</div>
         ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+          <DndContext
+            sensors={selectMode ? [] : sensors}
+            collisionDetection={closestCorners}
+            onDragEnd={onDragEnd}
+          >
             {grouped ? (
               <div className="flex flex-col gap-5">
                 {groups.length === 0 ? (
@@ -308,6 +357,7 @@ export function Board() {
                               dropId={`${group.key}${DROP_SEP}${col.id}`}
                               grouped
                               manualSort={false}
+                              {...selectProps}
                             />
                           ))}
                         </div>
@@ -325,6 +375,7 @@ export function Board() {
                     cards={cards}
                     childCounts={childCounts}
                     manualSort={boardPrefs.sortMode === "manual"}
+                    {...selectProps}
                     control={
                       col.id === "done" ? (
                         <select
@@ -350,6 +401,35 @@ export function Board() {
           </DndContext>
         )}
       </div>
+
+      {/* Outside the scrolling area, so it stays reachable at phone width where
+          the columns themselves scroll sideways. */}
+      {selectMode && (
+        <div
+          role="region"
+          aria-label="Selected beads"
+          className="flex flex-shrink-0 flex-wrap items-center gap-3 border-t border-border bg-[var(--surface)] px-[22px] py-[10px]"
+        >
+          <span className="text-[12.5px] font-[550]">
+            {selectedVisible.length} selected
+          </span>
+          <span className="text-[11.5px] text-[var(--text-3)]">
+            {selectedVisible.length === 0
+              ? "Tap beads to add them to a goal run"
+              : "One run works them in order, committing per bead"}
+          </span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            disabled={selectedVisible.length === 0}
+            className="h-7 rounded-[8px] border border-border px-[9px] text-[11.5px] font-[550] text-[var(--text-2)] disabled:opacity-45"
+          >
+            Clear
+          </button>
+          <RunGoalButton ids={selectedVisible} label="Run goal" />
+        </div>
+      )}
     </div>
   );
 }

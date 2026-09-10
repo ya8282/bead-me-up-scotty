@@ -19,11 +19,7 @@ const beads = [
 let started = null;
 const browser = await chromium.launch();
 try {
-  // Phone width: the whole point of select mode is that it works on touch.
-  const page = await browser.newPage({ viewport: { width: 390, height: 780 }, hasTouch: true });
-  const errors = [];
-  page.on('pageerror', e => errors.push(e.message));
-  await page.route('**/api/p/demo/**', async route => {
+  const mockApi = async route => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
     if (path.endsWith('/beads/stream')) return route.abort();
@@ -40,14 +36,33 @@ try {
       humanActor: 'chris', humanAllowlist: ['chris'],
     } } });
     return route.fulfill({ json: beads.find(b => path.endsWith(`/beads/${b.id}`)) ?? {} });
-  });
-
-  // The documented isolated server starts read-only; unlock this browser session
+  };
+  // The documented isolated server starts read-only; unlock each browser session
   // only, the way the board sorting checks do.
-  const unlock = await page.context().request.put(`${base}/api/viewer-mode`, { data: { readOnly: false } });
-  assert.equal(unlock.status(), 200, 'isolated demo can be unlocked for mutation assertions');
+  const openBoard = async (options) => {
+    const p = await browser.newPage(options);
+    await p.route('**/api/p/demo/**', mockApi);
+    const unlock = await p.context().request.put(`${base}/api/viewer-mode`, { data: { readOnly: false } });
+    assert.equal(unlock.status(), 200, 'isolated demo can be unlocked for mutation assertions');
+    await p.goto(`${base}/p/demo?view=board`);
+    return p;
+  };
 
-  await page.goto(`${base}/p/demo?view=board`);
+  // Laptop width: the header wraps, so Select and New stay on screen. Before it
+  // wrapped, adding Group by and Select pushed both past the right edge.
+  const laptop = await openBoard({ viewport: { width: 1280, height: 800 } });
+  for (const name of ['Select', 'New']) {
+    const button = laptop.getByRole('button', { name, exact: true });
+    await button.waitFor();
+    const box = await button.boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= 1280, `${name} is on screen at 1280px: ${JSON.stringify(box)}`);
+  }
+  await laptop.close();
+
+  // Phone width: the whole point of select mode is that it works on touch.
+  const page = await openBoard({ viewport: { width: 390, height: 780 }, hasTouch: true });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
   const selectToggle = page.getByRole('button', { name: 'Select', exact: true });
   await selectToggle.waitFor();
   assert.equal(await selectToggle.getAttribute('aria-pressed'), 'false');

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { initials, avatarColor, needsHuman, readyHumanGate } from "@/lib/beads-view";
 import { useGamification } from "@/hooks/use-beads";
+import { useGoalRuns } from "@/hooks/use-goal";
 // GITHUB_REPO is shared with the build badge (where bug/feature issues are filed).
 import { GITHUB_REPO } from "@/lib/build-info";
 import { BuildBadge } from "@/components/build-badge";
@@ -43,6 +44,7 @@ const NAV: { key: View; label: string; icon: string }[] = [
   { key: "graph", label: "Graph", icon: "graph" },
   { key: "insights", label: "Insights", icon: "milestone" },
   { key: "activity", label: "Activity", icon: "comment" },
+  { key: "goals", label: "Goals", icon: "bot" },
   { key: "needsyou", label: "Needs You", icon: "user" },
   { key: "achievements", label: "Achievements", icon: "feature" },
   { key: "publish", label: "Publish", icon: "rocket" },
@@ -70,6 +72,9 @@ export function Sidebar({
   const needsYouCount =
     beads.filter(needsHuman).length + beads.filter((b) => readyHumanGate(b, index)).length;
   const game = useGamification(projectId, !!meta?.gamification);
+  // Shares the board's query, so this adds no polling of its own. A run waiting
+  // on a person is the one thing worth seeing from every view.
+  const activeRun = useGoalRuns(projectId, kind === "bd").data?.active ?? null;
 
   return (
     <aside className="flex w-[228px] flex-shrink-0 flex-col border-r border-border bg-[var(--surface)] p-[18px_14px]">
@@ -106,6 +111,15 @@ export function Sidebar({
               <span className="flex-1">{n.label}</span>
               {n.key === "epics" && epicCount > 0 && (
                 <span className="font-mono text-[11px] text-[var(--text-3)]">{epicCount}</span>
+              )}
+              {n.key === "goals" && activeRun && (
+                <span
+                  className="rounded-full px-[6px] py-px text-[10.5px] font-semibold text-white"
+                  style={{ background: activeRun.state === "blocked" ? "#d97706" : "var(--brand)" }}
+                  title={`Goal run ${activeRun.id} is ${activeRun.state}`}
+                >
+                  {activeRun.state === "blocked" ? "waiting" : "live"}
+                </span>
               )}
               {n.key === "needsyou" && needsYouCount > 0 && (
                 <span

@@ -40,6 +40,22 @@ export interface GoalStartResponse {
   run: GoalRun;
   ids: string[];
 }
+/** One line of a run's feed, from its own transcript or one of its subagents'. */
+export interface GoalFeedItem {
+  id: string;
+  at: string;
+  /** "main" for the run itself, else the subagent's type and task. */
+  source: string;
+  /** command: the /goal it was started with; prompt: a message into the session. */
+  kind: "command" | "prompt" | "text" | "tool";
+  text: string;
+}
+export interface GoalFeedResponse {
+  run: GoalRun;
+  items: GoalFeedItem[];
+  /** The latest terminal screen, only while the run is blocked waiting on a person. */
+  screen: string | null;
+}
 
 export interface ActivityItem {
   id: string;
@@ -238,6 +254,8 @@ export const api = {
   // second while one holds the working tree.
   goal: {
     list: (projectId: string) => request<GoalRunsResponse>(`${base(projectId)}/goal`),
+    feed: (projectId: string, runId: string) =>
+      request<GoalFeedResponse>(`${base(projectId)}/goal/${enc(runId)}`),
     start: (projectId: string, ids: string[]) =>
       request<GoalStartResponse>(`${base(projectId)}/goal`, {
         method: "POST",

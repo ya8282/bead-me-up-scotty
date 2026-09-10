@@ -24,6 +24,20 @@ export function useGoalRuns(projectId: string, enabled = true) {
   });
 }
 
+/**
+ * One run's feed. Polls while the run is live, since transcripts are files the
+ * CLI appends to and nothing pushes their changes; a finished run loads once.
+ */
+export function useGoalFeed(projectId: string, runId: string | null, live: boolean) {
+  return useQuery({
+    queryKey: [...goalKey(projectId), "feed", runId] as const,
+    queryFn: () => api.goal.feed(projectId, runId as string),
+    enabled: !!runId,
+    refetchInterval: live ? 3000 : false,
+    retry: false,
+  });
+}
+
 /** Start one `/goal` run over the given beads. */
 export function useStartGoal() {
   const { projectId } = useApp();

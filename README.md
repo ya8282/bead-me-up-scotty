@@ -76,6 +76,10 @@ for AI agents.
   because `claude --bg` shares the working tree; a banner names the live run and
   the `claude attach <id>` command for it. Needs the `claude` CLI on `PATH`
   (`CLAUDE_BIN` overrides).
+- **Goals view** — watch goal runs without leaving Scotty (sidebar, or `G` then
+  `W`). It lists the project's runs and shows a live feed of the selected one,
+  merged from its own transcript and its subagents'. When a run is waiting on
+  you, its latest screen shows the question it's asking.
 - **Dependencies & graph** — view/add/remove typed dependencies in the detail
   drawer, plus an interactive React Flow dependency graph (drag node→node to link).
 - **Comments** — author-stamped comment threads with a composer on every bead.
@@ -328,6 +332,7 @@ The board browser checks share one isolated server:
 POSTHOG_KEY='' BEADS_DEMO=1 SCOTTY_READ_ONLY=1 npm run start -- --port 3198
 SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-grouping.mjs
 SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-board-selection.mjs
+SCOTTY_TEST_URL=http://localhost:3198 node scripts/test-goals-view.mjs
 ```
 
 ## License

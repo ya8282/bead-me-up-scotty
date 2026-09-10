@@ -43,7 +43,9 @@ export function fail(err: unknown) {
     const status =
       err.code === "goal_run_active"
         ? 409
-        : err.code === "claude_unavailable"
+        : err.code === "unknown_run"
+          ? 404
+          : err.code === "claude_unavailable"
           ? 503
           : err.code === "invalid_input" ||
               err.code === "empty_goal_set" ||

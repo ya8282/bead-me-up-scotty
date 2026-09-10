@@ -32,6 +32,31 @@ const stateFile = path.join(tmp, "sessions.json");
 const stub = path.join(tmp, "claude");
 
 fs.writeFileSync(stateFile, "[]");
+
+// The run's transcripts, where Claude Code keeps them: its own under some
+// project folder, and one per subagent beside it. Only what a person watching
+// needs should come out; tool results and meta entries must not.
+const SESSION_ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+const claudeHome = path.join(tmp, "claude-home");
+const sessionDir = path.join(claudeHome, "projects", "-somewhere-else-entirely");
+fs.mkdirSync(path.join(sessionDir, SESSION_ID, "subagents"), { recursive: true });
+const line = (o) => JSON.stringify(o);
+const t = (s) => `2026-09-10T18:00:${String(s).padStart(2, "0")}.000Z`;
+fs.writeFileSync(path.join(sessionDir, `${SESSION_ID}.jsonl`), [
+  line({ type: "queue-operation", operation: "enqueue" }),
+  line({ type: "user", uuid: "u1", timestamp: t(1), message: { content: "<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>bead-me-up fx-open</command-args>" } }),
+  line({ type: "user", uuid: "u2", timestamp: t(2), isMeta: true, message: { content: "Caveat: meta" } }),
+  line({ type: "assistant", uuid: "a1", timestamp: t(3), message: { content: [{ type: "text", text: "Planning the set." }, { type: "tool_use", name: "Bash", input: { command: "bd ready" } }] } }),
+  line({ type: "user", uuid: "u3", timestamp: t(4), message: { content: [{ type: "tool_result", content: "SECRET TOOL OUTPUT" }] } }),
+  line({ type: "assistant", uuid: "a2", timestamp: t(9), message: { content: [{ type: "text", text: "Waiting on review." }] } }),
+].join("\n") + "\n");
+const subDir = path.join(sessionDir, SESSION_ID, "subagents");
+fs.writeFileSync(path.join(subDir, "agent-x1.meta.json"), line({ agentType: "implementer", description: "fx-open work" }));
+fs.writeFileSync(path.join(subDir, "agent-x1.jsonl"), [
+  line({ type: "user", uuid: "s1", timestamp: t(5), isSidechain: true, message: { content: "Implement fx-open." } }),
+  line({ type: "assistant", uuid: "s2", timestamp: t(6), isSidechain: true, message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "/repo/a.ts" } }] } }),
+].join("\n") + "\n");
+
 fs.writeFileSync(
   stub,
   `#!/usr/bin/env node
@@ -46,11 +71,16 @@ if (args[0] === "agents") {
   console.log(JSON.stringify(read()));
   process.exit(0);
 }
+if (args[0] === "logs") {
+  // A redrawn terminal: spaces as cursor-forward, rows as cursor jumps.
+  process.stdout.write("\\x1b[2J\\x1b[1;1H✻ thinking with high effort\\x1b[2;1H──────────────────────\\x1b[3;1HWhich\\x1b[1Cfix\\x1b[1Cshould\\x1b[1Cwe\\x1b[1Cuse?\\x1b[4;1H❯ 1. Close the sheet\\x1b[5;1H  2. Raise the scrim\\x1b[6;1Hab\\n");
+  process.exit(0);
+}
 if (args[0] === "--bg") {
   const id = "ab12cd34";
   const sessions = read();
   sessions.push({ id, cwd: process.cwd(), kind: "background", state: "blocked",
-                  startedAt: Date.now(), name: args[1] });
+                  startedAt: Date.now(), name: args[1], sessionId: ${JSON.stringify(SESSION_ID)} });
   fs.writeFileSync(STATE, JSON.stringify(sessions));
   console.log("Started background session " + id);
   process.exit(0);
@@ -83,7 +113,14 @@ fs.chmodSync(bdStub, 0o755);
 
 const server = spawn("npx", ["next", "dev", "-p", String(PORT)], {
   cwd: REPO,
-  env: { ...process.env, XDG_CONFIG_HOME: tmp, CLAUDE_BIN: stub, BD_BIN: bdStub, BROWSER: "none" },
+  env: {
+    ...process.env,
+    XDG_CONFIG_HOME: tmp,
+    CLAUDE_CONFIG_DIR: claudeHome,
+    CLAUDE_BIN: stub,
+    BD_BIN: bdStub,
+    BROWSER: "none",
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
@@ -176,12 +213,45 @@ try {
   const busy = await json("GET", `/api/p/${pid}/goal`);
   assert.equal(busy.body.active.state, "blocked", "blocked run stays active");
 
-  // 8. Only "done" releases the lock.
+  // 8. The feed: the run's own transcript and its subagent's, in time order,
+  //    wherever Claude Code filed them, without tool results or meta entries.
+  const feed = await json("GET", `/api/p/${pid}/goal/ab12cd34`);
+  assert.equal(feed.status, 200, `feed: ${JSON.stringify(feed.body)}`);
+  assert.deepEqual(
+    feed.body.items.map((i) => [i.source, i.kind, i.text]),
+    [
+      ["main", "command", "/goal bead-me-up fx-open"],
+      ["main", "text", "Planning the set."],
+      ["main", "tool", "Bash: bd ready"],
+      ["implementer: fx-open work", "prompt", "Implement fx-open."],
+      ["implementer: fx-open work", "tool", "Edit: /repo/a.ts"],
+      ["main", "text", "Waiting on review."],
+    ],
+    "merged feed in time order",
+  );
+  assert.ok(!JSON.stringify(feed.body).includes("SECRET TOOL OUTPUT"), "tool results stay out of the feed");
+  // Blocked: the pending question lives only on screen, so the screen comes too.
+  assert.match(feed.body.screen, /Which fix should we use\?/, "cursor moves become spaces");
+  assert.match(feed.body.screen, /2\. Raise the scrim/, "each row on its own line");
+  assert.doesNotMatch(feed.body.screen, /^ab$/m, "spinner fragments are dropped");
+  assert.doesNotMatch(feed.body.screen, /thinking with high effort/, "status redraws above the prompt rule are dropped");
+  assert.match(feed.body.screen, /^─{10,}/, "the screen starts at the prompt area");
+
+  // Only this project's runs are readable, and ids never become paths.
+  const stranger = await json("GET", `/api/p/${pid}/goal/ffffffff`);
+  assert.equal(stranger.status, 404, "a run this project does not list is refused");
+  const traversal = await json("GET", `/api/p/${pid}/goal/..%2F..%2Fetc`);
+  assert.equal(traversal.status, 400, "a non-id is refused before any lookup");
+
+  // 9. Only "done" releases the lock.
   const done = JSON.parse(fs.readFileSync(stateFile, "utf8")).map((s) => ({ ...s, state: "done" }));
   fs.writeFileSync(stateFile, JSON.stringify(done));
   const free = await json("GET", `/api/p/${pid}/goal`);
   assert.equal(free.body.active, null, "a done run releases the lock");
   assert.equal(free.body.runs.length, 1, "the finished run is still listed");
+  const finished = await json("GET", `/api/p/${pid}/goal/ab12cd34`);
+  assert.equal(finished.body.screen, null, "no screen once nothing is waiting");
+  assert.equal(finished.body.items.length, 6, "a finished run's feed stays readable");
 
   console.log("test-goal-api: all checks passed");
 } catch (e) {

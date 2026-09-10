@@ -1,9 +1,8 @@
 import { z } from "zod";
-import { getProject } from "@/lib/config";
 import { getStore } from "@/lib/store";
 import { ok, fail } from "@/lib/api";
 import { AiError } from "@/lib/ai";
-import { listGoals, startGoal, MAX_GOAL_BEADS } from "@/lib/goal";
+import { goalRepoPath as repoPathOf, listGoals, startGoal, MAX_GOAL_BEADS } from "@/lib/goal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,21 +12,6 @@ type Ctx = { params: Promise<{ projectId: string }> };
 const bodySchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(MAX_GOAL_BEADS),
 });
-
-/**
- * The folder a goal run works in. The demo project has no path, and a run that
- * cannot check out a branch or commit has nothing to do.
- */
-function repoPathOf(projectId: string): string {
-  const project = getProject(projectId);
-  if (!project?.path) {
-    throw new AiError(
-      "Goal runs need a project folder on disk. Add this project from a local repo, then try again.",
-      "no_repo_path",
-    );
-  }
-  return project.path;
-}
 
 /** Goal runs for this project, plus the one holding the working tree. */
 export async function GET(_req: Request, { params }: Ctx) {

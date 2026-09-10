@@ -18,6 +18,7 @@ import { GraphView } from "@/components/graph-view";
 import { InsightsView } from "@/components/insights-view";
 import { ActivityView } from "@/components/activity-view";
 import { NeedsYouView } from "@/components/needs-you-view";
+import { GoalsView } from "@/components/goals-view";
 import { AchievementsView } from "@/components/achievements-view";
 import { PublishView } from "@/components/publish-view";
 import { SettingsView } from "@/components/settings-view";
@@ -236,6 +237,7 @@ export function AppShell({ projectId }: { projectId: string }) {
               {view === "graph" && <GraphView />}
               {view === "insights" && <InsightsView />}
               {view === "activity" && <ActivityView />}
+              {view === "goals" && <GoalsView />}
               {view === "needsyou" && <NeedsYouView />}
               {view === "achievements" && <AchievementsView />}
               {view === "publish" && <PublishView />}

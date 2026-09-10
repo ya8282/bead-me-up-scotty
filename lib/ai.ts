@@ -28,7 +28,13 @@ export function childEnv(): NodeJS.ProcessEnv {
 
 export function runClaudeCli(args: string[], timeoutMs: number, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(CLAUDE_BIN, args, { stdio: ["ignore", "pipe", "pipe"], env: childEnv(), cwd });
+    // The cwd is a project folder chosen at runtime, not app source: without the
+    // ignore, Turbopack traces the whole repo into the server output.
+    const child = spawn(/*turbopackIgnore: true*/ CLAUDE_BIN, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: childEnv(),
+      cwd,
+    });
     let stdout = "";
     let stderr = "";
     let done = false;

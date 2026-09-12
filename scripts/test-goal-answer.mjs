@@ -13,15 +13,31 @@ const scrimQuestion = {
   key: '1111111111111111',
   tabs: '←  ☐ tyw9 scrim  ☐ 0p2l.4 font  ✔ Submit  →',
   question: "repo-tyw9: the Score rail sheet stays open above the Export dialog's scrim. Which fix?",
+  multi: false,
   options: [
-    { n: 1, label: 'Close the sheet (Recommended)', detail: 'Dismiss the rail sheet when the dialog opens.', freeText: false },
-    { n: 2, label: 'Raise the scrim', detail: 'Put the scrim above the rail sheet.', freeText: false },
-    { n: 3, label: 'Type something.', detail: '', freeText: true },
+    { n: 1, label: 'Close the sheet (Recommended)', detail: 'Dismiss the rail sheet when the dialog opens.', freeText: false, selected: false },
+    { n: 2, label: 'Raise the scrim', detail: 'Put the scrim above the rail sheet.', freeText: false, selected: false },
+    { n: 3, label: 'Type something.', detail: '', freeText: true, selected: false },
   ],
   screen: '────\nrepo-tyw9: Which fix?\n❯ 1. Close the sheet (Recommended)',
 };
 const fontQuestion = { ...scrimQuestion, key: '2222222222222222', question: 'repo-0p2l.4: which font?',
-  options: [{ n: 1, label: 'Bravura', detail: '', freeText: false }, { n: 2, label: 'Type something.', detail: '', freeText: true }] };
+  options: [{ n: 1, label: 'Bravura', detail: '', freeText: false, selected: false }, { n: 2, label: 'Type something.', detail: '', freeText: true, selected: false }] };
+// A multi-select: its choices are ticked rather than clicked, and one of them
+// arrives already ticked on the run's screen.
+const fruitQuestion = {
+  key: '4444444444444444',
+  tabs: '←  ☒ Fruit  ☐ Color  ✔ Submit  →',
+  question: 'Which fruits should I buy?',
+  multi: true,
+  options: [
+    { n: 1, label: 'Apple', detail: 'Crisp and versatile.', freeText: false, selected: true },
+    { n: 2, label: 'Banana', detail: 'Easy to carry, no prep.', freeText: false, selected: false },
+    { n: 3, label: 'Cherry', detail: 'Seasonal, sweet-tart.', freeText: false, selected: false },
+    { n: 4, label: 'Type something', detail: '', freeText: true, selected: false },
+  ],
+  screen: '────\nWhich fruits should I buy?\n❯ 1. [✔] Apple',
+};
 
 let prompt = scrimQuestion;
 let answerStatus = 200;
@@ -77,7 +93,7 @@ try {
   // One click answers with that number, naming the question it answers.
   await choices.nth(1).click();
   await card.getByRole('status').getByText('Sent.', { exact: false }).waitFor();
-  assert.deepEqual(answers.at(-1), { key: scrimQuestion.key, option: 2 });
+  assert.deepEqual(answers.at(-1), { key: scrimQuestion.key, options: [2] });
   assert.equal(await choices.nth(0).isDisabled(), true, 'the same question cannot be answered twice');
 
   // The run moves to its next question; the card follows and re-enables.
@@ -92,7 +108,22 @@ try {
   await card.getByRole('textbox', { name: 'Your answer' }).fill('Use Petaluma for handwritten scores');
   await card.getByRole('button', { name: 'Send answer' }).click();
   await card.getByRole('status').waitFor();
-  assert.deepEqual(answers.at(-1), { key: fontQuestion.key, option: 2, text: 'Use Petaluma for handwritten scores' });
+  assert.deepEqual(answers.at(-1), { key: fontQuestion.key, options: [2], text: 'Use Petaluma for handwritten scores' });
+
+  // A multi-select is ticked, not clicked, and sent as one set. What the run
+  // already has ticked is where the boxes start.
+  prompt = fruitQuestion;
+  await card.getByText('Which fruits should I buy?').first().waitFor({ timeout: 10_000 });
+  const boxes = card.getByRole('group', { name: 'Choices' }).getByRole('checkbox');
+  assert.equal(await boxes.count(), 3, 'a box per choice, with Type something left a button');
+  assert.equal(await boxes.nth(0).isChecked(), true, "the run's own tick carries over");
+  assert.equal(await boxes.nth(2).isChecked(), false);
+  await boxes.nth(0).uncheck();
+  await boxes.nth(2).check();
+  await card.getByText('1 ticked', { exact: false }).waitFor();
+  await card.getByRole('button', { name: 'Send answers' }).click();
+  await card.getByRole('status').getByText('Sent.', { exact: false }).waitFor();
+  assert.deepEqual(answers.at(-1), { key: fruitQuestion.key, options: [3] });
 
   // If the run moved on first, the refusal is explained rather than swallowed.
   prompt = { ...scrimQuestion, key: '3333333333333333' };

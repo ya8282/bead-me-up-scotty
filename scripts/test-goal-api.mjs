@@ -56,6 +56,32 @@ const SCREEN = [
   "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
 ].join("");
 
+// A multi-select question, as Claude Code really draws one: the choices carry
+// ticks, a number toggles one, and only Tab leaves the question.
+const MULTI_SCREEN = [
+  "\x1b[2J\x1b[H",
+  `${rule}\r\n`,
+  "←  ☒ Fruit  ☐ Color  ✔ Submit  →\r\n",
+  "\r\n",
+  "Which fruits should I buy?\r\n",
+  "\r\n",
+  "❯ 1. [✔] Apple\r\n",
+  "  Crisp and versatile.\r\n",
+  "  2. [ ] Banana\r\n",
+  "  Easy to carry, no prep.\r\n",
+  "  3. [ ] Cherry\r\n",
+  "  Seasonal, sweet-tart.\r\n",
+  "  4. [ ] Type something\r\n",
+  "     Next\r\n",
+  `${rule}\r\n`,
+  "  5. Chat about this\r\n",
+  "\r\n",
+  "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+].join("");
+// The screen the stub paints, swapped to pose a different question.
+const showScreen = (screen) => fs.writeFileSync(stateFile + ".screen", screen);
+showScreen(SCREEN);
+
 // The run's transcripts, where Claude Code keeps them: its own under some
 // project folder, and one per subagent beside it. Only what a person watching
 // needs should come out; tool results and meta entries must not.
@@ -94,11 +120,11 @@ if (args[0] === "agents") {
   console.log(JSON.stringify(read()));
   process.exit(0);
 }
-if (args[0] === "logs") { process.stdout.write(${JSON.stringify(SCREEN)}); process.exit(0); }
+if (args[0] === "logs") { process.stdout.write(fs.readFileSync(STATE + ".screen", "utf8")); process.exit(0); }
 if (args[0] === "attach") {
   // Stands in for the real TUI: paint the question, take raw keys, record
   // them, and leave on Ctrl+Z the way claude attach does.
-  process.stdout.write(${JSON.stringify(SCREEN)});
+  process.stdout.write(fs.readFileSync(STATE + ".screen", "utf8"));
   process.stdin.setRawMode(true);
   let keys = "";
   process.stdin.on("data", (d) => {
@@ -286,22 +312,59 @@ try {
   // Answering: the option's number goes into the live session through a pty.
   const keysFile = stateFile + ".keys";
   const answer = (body) => json("POST", `/api/p/${pid}/goal/ab12cd34`, body);
-  const picked = await answer({ key: prompt.key, option: 2 });
+  const picked = await answer({ key: prompt.key, options: [2] });
   assert.equal(picked.status, 200, `answer: ${JSON.stringify(picked.body)}`);
   assert.equal(fs.readFileSync(keysFile, "utf8"), "2", "pressed 2 and nothing else");
 
   // Typed answers: number, text, Enter. Control characters never become keys.
-  const typed = await answer({ key: prompt.key, option: 3, text: "Medium\nplease\x1b[A" });
+  const typed = await answer({ key: prompt.key, options: [3], text: "Medium\nplease\x1b[A" });
   assert.equal(typed.status, 200, `typed answer: ${JSON.stringify(typed.body)}`);
   assert.equal(fs.readFileSync(keysFile, "utf8"), "3Medium please [A\r", "newlines and escapes are neutralised");
 
   fs.writeFileSync(keysFile, "untouched");
-  const stale = await answer({ key: "0000000000000000", option: 2 });
+  const stale = await answer({ key: "0000000000000000", options: [2] });
   assert.equal(stale.status, 409, "an answer to a question no longer showing is refused");
   assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "and nothing was typed");
-  assert.equal((await answer({ key: prompt.key, option: 4 })).status, 400, "only the parsed choices are answerable");
-  assert.equal((await answer({ key: prompt.key, option: 3 })).status, 400, "a typed choice needs text");
+  assert.equal((await answer({ key: prompt.key, options: [4] })).status, 400, "only the parsed choices are answerable");
+  assert.equal((await answer({ key: prompt.key, options: [3] })).status, 400, "a typed choice needs text");
+  assert.equal((await answer({ key: prompt.key, options: [1, 2] })).status, 400, "a single-select takes one answer");
   assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "refusals type nothing");
+
+  // 8b. A multi-select question: ticks are read off the screen, and an answer is
+  // the whole set, sent as the toggles that get from one to the other plus Tab.
+  showScreen(MULTI_SCREEN);
+  const multi = (await json("GET", `/api/p/${pid}/goal/ab12cd34`)).body.prompt;
+  assert.ok(multi, "a multi-select question is parsed");
+  assert.equal(multi.multi, true, "and is marked as one");
+  assert.equal(multi.question, "Which fruits should I buy?");
+  assert.deepEqual(
+    multi.options.map((o) => [o.n, o.label, o.freeText, o.selected]),
+    [
+      [1, "Apple", false, true], // the tick is stripped from the label
+      [2, "Banana", false, false],
+      [3, "Cherry", false, false],
+      [4, "Type something", true, false],
+    ],
+    "ticked state per choice, with the Next button not read as a detail",
+  );
+
+  const mAnswer = (body) => answer({ key: multi.key, ...body });
+  assert.equal((await mAnswer({ options: [3] })).status, 200);
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "13\t", "unticks Apple, ticks Cherry, then Tab");
+
+  assert.equal((await mAnswer({ options: [1] })).status, 200);
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "\t", "already what was asked for, so only Tab");
+
+  assert.equal((await mAnswer({ options: [] })).status, 200);
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "1\t", "none of these clears what was ticked");
+
+  fs.writeFileSync(keysFile, "untouched");
+  assert.equal((await mAnswer({ options: [1, 4], text: "Kiwi" })).status, 400, "a typed answer cannot join ticks");
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched");
+  assert.equal((await mAnswer({ options: [4], text: "Kiwi" })).status, 200, "but stands on its own");
+  assert.equal(fs.readFileSync(keysFile, "utf8"), "4Kiwi\r");
+  showScreen(SCREEN);
+  fs.writeFileSync(keysFile, "untouched");
 
   // Only this project's runs are readable, and ids never become paths.
   const stranger = await json("GET", `/api/p/${pid}/goal/ffffffff`);
@@ -318,7 +381,7 @@ try {
   const finished = await json("GET", `/api/p/${pid}/goal/ab12cd34`);
   assert.equal(finished.body.screen, null, "no screen once nothing is waiting");
   assert.equal(finished.body.prompt, null, "and no question");
-  const late = await json("POST", `/api/p/${pid}/goal/ab12cd34`, { key: prompt.key, option: 1 });
+  const late = await json("POST", `/api/p/${pid}/goal/ab12cd34`, { key: prompt.key, options: [1] });
   assert.equal(late.status, 409, "a run that is not waiting cannot be answered");
   assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "and nothing was typed");
   assert.equal(finished.body.items.length, 6, "a finished run's feed stays readable");

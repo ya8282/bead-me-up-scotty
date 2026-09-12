@@ -57,6 +57,8 @@ export interface GoalPromptOption {
   detail: string;
   /** "Type something": choosing it means sending typed text as the answer. */
   freeText: boolean;
+  /** Whether this choice is currently ticked. Only a multi-select has ticks. */
+  selected: boolean;
 }
 /** The question a waiting run is showing, read from its screen. */
 export interface GoalPrompt {
@@ -66,6 +68,11 @@ export interface GoalPrompt {
   tabs: string;
   question: string;
   options: GoalPromptOption[];
+  /**
+   * A multi-select question: its choices are checkboxes that a number toggles,
+   * so an answer is the whole set and sending it moves on to the next question.
+   */
+  multi: boolean;
   screen: string;
 }
 export interface GoalFeedResponse {
@@ -78,7 +85,8 @@ export interface GoalFeedResponse {
 }
 export interface GoalAnswer {
   key: string;
-  option: number;
+  /** The choices to send: one for a single-select, the whole set for a multi. */
+  options: number[];
   text?: string;
 }
 

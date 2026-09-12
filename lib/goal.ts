@@ -328,8 +328,11 @@ async function renderScreen(raw: string): Promise<string[]> {
 }
 
 const OPTION = /^\s*[❯›>]?\s*(\d{1,2})\.\s+(\S.*?)\s*$/;
+/** A multi-select choice: `[ ] Apple` unticked, `[✔] Apple` ticked. */
+const TICK = /^\[(.)\]\s+(\S.*)$/;
 const RULE = /^\s*─{10,}\s*$/;
-const HINT = /Enter to (select|confirm)|Esc to cancel|Tab\/Arrow keys|ctrl\+g to edit/i;
+// `Next` on its own is the button under a multi-select's choices, not a detail.
+const HINT = /Enter to (select|confirm)|Esc to cancel|Tab\/Arrow keys|ctrl\+g to edit|^Next$/i;
 
 /**
  * The question a waiting run shows, as data: an AskUserQuestion step (including
@@ -364,23 +367,36 @@ function parsePrompt(lines: string[]): GoalPrompt | null {
       const end = at[k + 1]?.line ?? lines.length;
       const detail = lines
         .slice(line + 1, end)
-        .filter((l) => l.trim() && !RULE.test(l) && !HINT.test(l))
         .map((l) => l.trim())
+        .filter((l) => l && !RULE.test(l) && !HINT.test(l))
         .join(" ");
-      return { n, label, detail, freeText: /^Type something\.?$/i.test(label) };
+      const tick = label.match(TICK);
+      const text = tick ? tick[2] : label;
+      return {
+        n,
+        label: text,
+        detail,
+        freeText: /^Type something\.?$/i.test(text),
+        selected: !!tick && tick[1].trim() !== "",
+      };
     })
     // Declining into a free-form chat needs a conversation, not a button.
     .filter((o) => !/^Chat about this/i.test(o.label));
+  // Ticks appear on every choice of a multi-select question and on none of a
+  // single-select one, so any tick identifies the kind.
+  const multi = at.some(({ label }) => TICK.test(label));
 
   const shown = lines
     .slice(Math.max(top, 0))
     .map((l) => (RULE.test(l) ? "─".repeat(40) : l))
     .join("\n");
+  // The ticks are deliberately outside the key: a person ticking a box in
+  // Scotty must not invalidate the question they are still answering.
   const key = createHash("sha1")
     .update(JSON.stringify([tabs, question, options.map((o) => o.label)]))
     .digest("hex")
     .slice(0, 16);
-  return { key, tabs, question, options, screen: shown };
+  return { key, tabs, question, multi, options, screen: shown };
 }
 
 /**
@@ -464,11 +480,19 @@ function typedText(text: unknown): string {
  * Answer the question a waiting run is showing. The caller names the prompt it
  * was looking at by key, and the screen is re-read first: if the run has moved
  * on, nothing is sent, so a click can never land on a different question.
+ *
+ * A single-select question takes one number and the run moves on by itself. A
+ * multi-select one does not: a number TOGGLES a checkbox, Enter toggles the
+ * highlighted row rather than confirming, and only Tab leaves the question. So
+ * the whole set is sent as toggles against what the screen currently shows,
+ * followed by Tab, which lands on the next question or on the review screen —
+ * and the review screen is an ordinary numbered list whose choice is "Submit
+ * answers", so submitting needs nothing special here.
  */
 export async function answerGoal(
   repoPath: string,
   id: string,
-  answer: { key: string; option: number; text?: string },
+  answer: { key: string; options: number[]; text?: string },
 ): Promise<void> {
   if (!/^[0-9a-f]{6,40}$/.test(id)) throw new AiError("Not a goal run id.", "invalid_input");
   const run = (await listGoals(repoPath)).find((r) => r.id === id);
@@ -485,17 +509,39 @@ export async function answerGoal(
       "prompt_changed",
     );
   }
-  const option = prompt.options.find((o) => o.n === answer.option);
-  if (!option) throw new AiError(`Option ${answer.option} is not one of this question's choices.`, "invalid_input");
+  const picked = answer.options.map((n) => {
+    const option = prompt.options.find((o) => o.n === n);
+    if (!option) throw new AiError(`Option ${n} is not one of this question's choices.`, "invalid_input");
+    return option;
+  });
 
-  const chunks = [String(option.n)];
-  if (option.freeText) {
+  const freeText = picked.find((o) => o.freeText);
+  let chunks: string[];
+  let expect: string;
+  if (freeText) {
+    // Typing an answer is its own widget, so it cannot be combined with ticks.
+    if (picked.length > 1) {
+      throw new AiError("Send a typed answer on its own, not alongside other choices.", "invalid_input");
+    }
     const text = typedText(answer.text);
     if (!text) throw new AiError("Type your answer before sending it.", "invalid_input");
-    chunks.push(text, "\r");
+    chunks = [String(freeText.n), text, "\r"];
+    expect = freeText.label;
+  } else if (prompt.multi) {
+    const want = new Set(picked.map((o) => o.n));
+    // Only what differs: a number typed at an already-ticked box unticks it.
+    const toggles = prompt.options.filter((o) => !o.freeText && want.has(o.n) !== o.selected);
+    chunks = [...toggles.map((o) => String(o.n)), "\t"];
+    expect = (toggles[0] ?? prompt.options[0]).label;
+  } else {
+    if (picked.length !== 1) {
+      throw new AiError("This question takes exactly one answer.", "invalid_input");
+    }
+    chunks = [String(picked[0].n)];
+    expect = picked[0].label;
   }
-  // Waiting for the option's own label confirms the attach landed on this prompt.
-  await typeIntoSession(id, screenWidth(raw), option.label.replace(/\s+/g, ""), chunks);
+  // Waiting for an option's own label confirms the attach landed on this prompt.
+  await typeIntoSession(id, screenWidth(raw), expect.replace(/\s+/g, ""), chunks);
 }
 
 const FEED_LIMIT = 300;

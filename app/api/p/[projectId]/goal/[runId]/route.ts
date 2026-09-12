@@ -19,7 +19,8 @@ export async function GET(_req: Request, { params }: Ctx) {
 
 const answerSchema = z.object({
   key: z.string().regex(/^[0-9a-f]{16}$/),
-  option: z.number().int().min(1).max(99),
+  // A multi-select sends its whole set; empty means "none of these".
+  options: z.array(z.number().int().min(1).max(99)).max(32),
   text: z.string().max(2000).optional(),
 });
 

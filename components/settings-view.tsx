@@ -473,7 +473,7 @@ function NotificationsCard() {
           <div className="text-[11.5px] text-[var(--text-3)]">
             {unsupported
               ? "This browser does not support desktop notifications."
-              : "Get notified when an agent finishes or blocks a bead, or escalates one to you."}
+              : "Get notified when an agent finishes or blocks a bead, escalates one to you, or a goal run needs you."}
           </div>
         </div>
         <button
@@ -495,6 +495,8 @@ function NotificationsCard() {
         {cat("finished", "An agent finishes a bead")}
         {cat("blocked", "A bead becomes blocked")}
         {cat("escalation", "A bead is escalated to you (Needs You)")}
+        {cat("goalWaiting", "A goal run stops to ask you something")}
+        {cat("goalDone", "A goal run finishes")}
       </div>
       <div className="text-[11.5px] text-[var(--text-3)]">
         Per-device — stored in this browser, not in beads. Your own (human) actions never notify.

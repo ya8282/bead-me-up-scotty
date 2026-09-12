@@ -97,7 +97,7 @@ export function AppShell({ projectId }: { projectId: string }) {
       nonce: (detailNonce.current += 1),
     });
   }, [readOnly]);
-  useNotificationActivation(projectId, openDetail);
+  useNotificationActivation(projectId, openDetail, setView);
   // PUSH. Drawer-internal navigation only, so back can return.
   const MAX_TRAIL = 25;
   const pushDetail = React.useCallback((id: string) => {

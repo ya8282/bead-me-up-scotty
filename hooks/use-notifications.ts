@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { useActivity } from "@/hooks/use-beads";
 import { useApp } from "@/components/app-context";
 import { needsHuman } from "@/lib/beads-view";
+import { useGoalRuns } from "@/hooks/use-goal";
+import type { View } from "@/lib/views";
 
 /**
  * Opt-in desktop/toast notifications for Mission Control. Fires when an agent
@@ -21,8 +23,17 @@ export interface NotifPrefs {
   finished: boolean;
   blocked: boolean;
   escalation: boolean;
+  goalWaiting: boolean;
+  goalDone: boolean;
 }
-const DEFAULTS: NotifPrefs = { enabled: false, finished: true, blocked: true, escalation: true };
+const DEFAULTS: NotifPrefs = {
+  enabled: false,
+  finished: true,
+  blocked: true,
+  escalation: true,
+  goalWaiting: true,
+  goalDone: true,
+};
 
 export function loadPrefs(): NotifPrefs {
   if (typeof window === "undefined") return DEFAULTS;
@@ -32,8 +43,23 @@ export function loadPrefs(): NotifPrefs {
     return DEFAULTS;
   }
 }
+/**
+ * Watching goal runs costs a `claude agents` subprocess every few seconds, so
+ * the watcher only polls while those notifications are on. Settings writes
+ * prefs in the same tab, which no storage event reports, hence this subscription.
+ */
+const prefListeners = new Set<() => void>();
 function savePrefs(p: NotifPrefs) {
   if (typeof window !== "undefined") localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  for (const notify of prefListeners) notify();
+}
+function subscribePrefs(notify: () => void) {
+  prefListeners.add(notify);
+  return () => void prefListeners.delete(notify);
+}
+function watchingGoals(): boolean {
+  const p = loadPrefs();
+  return p.enabled && (p.goalWaiting || p.goalDone);
 }
 
 type Permission = NotificationPermission | "unsupported";
@@ -75,39 +101,48 @@ function currentProjectId(): string | null {
   }
 }
 
+/** What a notification opens: the bead it is about, or the view that shows it. */
+export type NotifTarget = { bead: string } | { view: View };
+
 /** Activate a notification without retaining a component callback that may have
  * been unmounted after the user switched projects. */
-export function activateNotification(projectId: string, beadId: string) {
+export function activateNotification(projectId: string, target: NotifTarget) {
   if (typeof window === "undefined") return;
   if (currentProjectId() === projectId) {
     const event = new CustomEvent(OPEN_BEAD_EVENT, {
       cancelable: true,
-      detail: { projectId, beadId },
+      detail: { projectId, target },
     });
     // A transition can update the URL before the incoming AppShell listener is
     // mounted. In that narrow window, fall through to the URL landing route.
     if (!window.dispatchEvent(event)) return;
   }
-  window.location.assign(`/p/${encodeURIComponent(projectId)}?bead=${encodeURIComponent(beadId)}`);
+  const query =
+    "bead" in target ? `bead=${encodeURIComponent(target.bead)}` : `view=${encodeURIComponent(target.view)}`;
+  window.location.assign(`/p/${encodeURIComponent(projectId)}?${query}`);
 }
 
 /** Registers the current AppShell as the live, project-scoped notification
  * target. The listener is discarded when a project shell unmounts. */
-export function useNotificationActivation(projectId: string, openDetail: (id: string) => void) {
+export function useNotificationActivation(
+  projectId: string,
+  openDetail: (id: string) => void,
+  setView: (view: View) => void,
+) {
   React.useEffect(() => {
-    const onOpenBead = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId?: string; beadId?: string }>).detail;
-      if (detail?.projectId === projectId && detail.beadId) {
-        event.preventDefault();
-        openDetail(detail.beadId);
-      }
+    const onActivate = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; target?: NotifTarget }>).detail;
+      if (detail?.projectId !== projectId || !detail.target) return;
+      event.preventDefault();
+      if ("bead" in detail.target) openDetail(detail.target.bead);
+      else setView(detail.target.view);
     };
-    window.addEventListener(OPEN_BEAD_EVENT, onOpenBead);
-    return () => window.removeEventListener(OPEN_BEAD_EVENT, onOpenBead);
-  }, [projectId, openDetail]);
+    window.addEventListener(OPEN_BEAD_EVENT, onActivate);
+    return () => window.removeEventListener(OPEN_BEAD_EVENT, onActivate);
+  }, [projectId, openDetail, setView]);
 }
 
-function fire(title: string, body: string, projectId: string, beadId: string) {
+function fire(title: string, body: string, projectId: string, target: NotifTarget) {
   // Always show an in-app toast; raise a desktop Notification when granted.
   toast(title, { description: body });
   if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
@@ -116,7 +151,7 @@ function fire(title: string, body: string, projectId: string, beadId: string) {
       notification.onclick = () => {
         notification.close();
         window.focus();
-        activateNotification(projectId, beadId);
+        activateNotification(projectId, target);
       };
     } catch {
       /* some browsers throw if called outside a user gesture — ignore */
@@ -132,11 +167,16 @@ function fire(title: string, body: string, projectId: string, beadId: string) {
  */
 export function useNotificationWatcher(projectId: string) {
   const { data } = useActivity(projectId);
-  const { beads, loading, error } = useApp();
+  const { beads, loading, error, meta } = useApp();
   const items = data?.items;
+
+  // The demo project has no folder on disk, so it can never host a goal run.
+  const watchGoals = React.useSyncExternalStore(subscribePrefs, watchingGoals, () => false);
+  const runs = useGoalRuns(projectId, watchGoals && meta?.kind === "bd").data?.runs;
 
   const lastSeenRef = React.useRef<string | null>(null);
   const seenHumanRef = React.useRef<Set<string> | null>(null);
+  const seenRunsRef = React.useRef<Map<string, string> | null>(null);
 
   // Agent-finished / blocked, from the activity feed.
   React.useEffect(() => {
@@ -156,9 +196,9 @@ export function useNotificationWatcher(projectId: string) {
       if (it.at <= prevSeen) break; // items are newest-first
       if (it.origin !== "agent") continue;
       if (prefs.finished && it.action === "closed") {
-        fire(`🤖 ${it.actor} finished ${it.issueId}`, it.title, projectId, it.issueId);
+        fire(`🤖 ${it.actor} finished ${it.issueId}`, it.title, projectId, { bead: it.issueId });
       } else if (prefs.blocked && it.action.startsWith("marked Blocked")) {
-        fire(`⛔ ${it.issueId} is blocked`, it.title, projectId, it.issueId);
+        fire(`⛔ ${it.issueId} is blocked`, it.title, projectId, { bead: it.issueId });
       }
     }
   }, [items, projectId]);
@@ -180,8 +220,35 @@ export function useNotificationWatcher(projectId: string) {
     if (!prefs.enabled || !prefs.escalation) return;
     for (const b of beads.filter(needsHuman)) {
       if (!prevSeen.has(b.id)) {
-        fire(`🙋 Needs you: ${b.id}`, b.title, projectId, b.id);
+        fire(`🙋 Needs you: ${b.id}`, b.title, projectId, { bead: b.id });
       }
     }
   }, [beads, error, loading, projectId]);
+
+  // Goal runs stopping on a question, or reaching the end of their work.
+  React.useEffect(() => {
+    if (!runs) return;
+    const current = new Map(runs.map((r) => [r.id, r.state]));
+    // First tick: baseline, so runs that were already waiting don't all fire.
+    if (seenRunsRef.current === null) {
+      seenRunsRef.current = current;
+      return;
+    }
+    const prevSeen = seenRunsRef.current;
+    seenRunsRef.current = current;
+
+    const prefs = loadPrefs();
+    if (!prefs.enabled) return;
+    for (const run of runs) {
+      const was = prevSeen.get(run.id);
+      // A run first seen mid-flight has no transition to report.
+      if (was === undefined || was === run.state) continue;
+      const label = run.name || `${run.id} in this project`;
+      if (run.state === "blocked") {
+        if (prefs.goalWaiting) fire(`🙋 Goal run ${run.id} is waiting on you`, label, projectId, { view: "goals" });
+      } else if (!run.live && prefs.goalDone) {
+        fire(`🤖 Goal run ${run.id} finished`, label, projectId, { view: "goals" });
+      }
+    }
+  }, [runs, projectId]);
 }

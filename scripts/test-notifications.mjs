@@ -12,10 +12,15 @@ const bead = (id, title, extra = {}) => ({
 });
 const projectOne = "project-one";
 const projectTwo = "project-two";
+const projectGoals = "project-goals";
 const projectData = {
   [projectOne]: [bead("finish-1", "Finished bead"), bead("blocked-1", "Blocked bead"), bead("human-1", "Historical escalation", { labels: ["human"] })],
   [projectTwo]: [bead("two-1", "Second project bead")],
+  [projectGoals]: [bead("goal-1", "A bead a run is working")],
 };
+// Only a project backed by a real beads repo can host a goal run.
+const goalRun = { id: "aa11bb22", cwd: "/r", state: "working", startedAt: Date.parse("2026-09-06T11:00:00Z"), name: "goal project-goals goal-1", live: true };
+let goalRuns = [goalRun];
 let activity = [];
 const activityItem = (id, action, at) => ({ id, issueId: id, title: projectData[projectOne].find((b) => b.id === id).title, actor: "agent", origin: "agent", action, at });
 
@@ -45,6 +50,7 @@ try {
   await page.route("**/api/projects", (route) => route.fulfill({ json: { projects: [
     { id: projectOne, name: "Project One", path: null, hasBeads: true },
     { id: projectTwo, name: "Project Two", path: null, hasBeads: true },
+    { id: projectGoals, name: "Project Goals", path: "/r", hasBeads: true },
   ] } }));
   await page.route("**/api/p/**", async (route) => {
     const url = new URL(route.request().url());
@@ -52,8 +58,10 @@ try {
     const id = decodeURIComponent(match[1]);
     const tail = match[2];
     if (tail === "beads/stream") return route.abort();
-    if (tail === "beads") return route.fulfill({ json: { beads: projectData[id], meta: { kind: "demo", humanActor: "reviewer", humanAllowlist: ["reviewer"], pollIntervalMs: 1000 } } });
-    if (tail === "activity") return route.fulfill({ json: { items: activity } });
+    if (tail === "beads") return route.fulfill({ json: { beads: projectData[id], meta: { kind: id === projectGoals ? "bd" : "demo", humanActor: "reviewer", humanAllowlist: ["reviewer"], pollIntervalMs: 1000 } } });
+    if (tail === "activity") return route.fulfill({ json: { items: id === projectOne ? activity : [] } });
+    if (tail === "goal") return route.fulfill({ json: { runs: goalRuns, active: goalRuns.find((r) => r.live) ?? null } });
+    if (tail.startsWith("goal/")) return route.fulfill({ json: { run: goalRuns[0], items: [], screen: null, prompt: null } });
     return route.fulfill({ json: {} });
   });
 
@@ -97,7 +105,38 @@ try {
   await page.waitForURL(new RegExp(`/p/${encodeURIComponent(projectOne)}\\?bead=blocked-1$`));
   await page.getByRole("dialog").getByText("Blocked bead", { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => JSON.parse(sessionStorage.getItem("notification-events") || "[]")), [{ type: "close", title: "🤖 agent finished finish-1" }, { type: "focus" }, { type: "close", title: "⛔ blocked-1 is blocked" }, { type: "focus" }], "a retained notification closes and focuses before it returns to its originating project");
-  console.log("PASS: notification categories, historical baselines, same-project activation, and retained cross-project activation");
+  // Goal runs: a run already in flight is the baseline, then each state change
+  // it makes notifies once. The stored prefs predate these two keys, so this
+  // also covers their defaults being merged in.
+  await page.getByRole("button", { name: /Close/ }).click();
+  await page.getByRole("button", { name: "Project One" }).click();
+  await page.getByText("Project Goals", { exact: true }).click();
+  await page.getByText("A bead a run is working", { exact: true }).waitFor();
+  const before = await page.evaluate(() => window.__notifications.length);
+  await page.clock.fastForward(21000);
+  assert.equal(await page.evaluate(() => window.__notifications.length), before, "a run already in flight is not announced");
+
+  goalRuns = [{ ...goalRun, state: "blocked" }];
+  await page.clock.fastForward(5001);
+  await page.waitForFunction(() => window.__notifications.some((n) => n.title.includes("aa11bb22 is waiting on you")));
+
+  goalRuns = [{ ...goalRun, state: "done", live: false }];
+  await page.clock.fastForward(5001);
+  await page.waitForFunction(() => window.__notifications.some((n) => n.title.includes("aa11bb22 finished")));
+  await page.clock.fastForward(21000);
+  assert.equal(
+    await page.evaluate(() => window.__notifications.filter((n) => n.title.includes("aa11bb22 finished")).length),
+    1,
+    "a settled run does not notify again on every poll",
+  );
+
+  // Its notification opens the view that shows the run, not a bead drawer.
+  const waitingIndex = await page.evaluate(() => window.__notifications.findIndex((n) => n.title.includes("is waiting on you")));
+  await page.evaluate((index) => window.__notifications[index].onclick(), waitingIndex);
+  await page.getByRole("heading", { name: "Goals" }).waitFor();
+  await page.waitForURL(/view=goals/);
+
+  console.log("PASS: notification categories, historical baselines, same-project activation, retained cross-project activation, and goal run transitions");
 } catch (error) {
   console.error({ errors, url: page.url(), body: (await page.locator("body").innerText()).slice(0, 3000) });
   throw error;

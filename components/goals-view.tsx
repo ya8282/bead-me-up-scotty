@@ -35,6 +35,9 @@ const KIND_LABEL: Record<GoalFeedItem["kind"], string> = {
   text: "Says",
   tool: "Runs",
 };
+const KINDS = Object.keys(KIND_LABEL) as GoalFeedItem["kind"][];
+/** Sentinel for the source picker; no transcript source is ever this. */
+const ALL = "";
 
 function clock(iso: string): string {
   const d = new Date(iso);
@@ -150,13 +153,40 @@ function RunOutput({
   error: Error | null;
 }) {
   const scroller = React.useRef<HTMLDivElement>(null);
+  // Filters are per-run: RunOutput is keyed by run id, so picking another run
+  // remounts with them cleared.
+  const [query, setQuery] = React.useState("");
+  const [source, setSource] = React.useState(ALL);
+  // Empty means every kind, so a new kind is visible without touching this.
+  const [kinds, setKinds] = React.useState<ReadonlySet<GoalFeedItem["kind"]>>(new Set());
+  const sources = React.useMemo(() => [...new Set(items.map((i) => i.source))], [items]);
+  // A source that only appears later must not leave the feed silently empty.
+  const pickedSource = sources.includes(source) ? source : ALL;
+
+  const shown = React.useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return items.filter(
+      (it) =>
+        (pickedSource === ALL || it.source === pickedSource) &&
+        (kinds.size === 0 || kinds.has(it.kind)) &&
+        (!needle || it.text.toLowerCase().includes(needle) || it.source.toLowerCase().includes(needle)),
+    );
+  }, [items, query, pickedSource, kinds]);
+
+  const filtering = !!query.trim() || pickedSource !== ALL || kinds.size > 0;
+  const clear = () => {
+    setQuery("");
+    setSource(ALL);
+    setKinds(new Set());
+  };
+
   // Follow new output only while the reader is already at the bottom, so
   // scrolling back to read something is not yanked away by the next poll.
   const following = React.useRef(true);
   React.useEffect(() => {
     const el = scroller.current;
     if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [items.length, screen]);
+  }, [shown.length, screen]);
 
   return (
     <section aria-label="Run output" className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -170,6 +200,75 @@ function RunOutput({
           className="rounded-md border border-border bg-[var(--surface-2)] px-[7px] py-[2px] font-mono text-[11.5px] text-[var(--text-2)] no-underline"
         />
       </div>
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-[9px]">
+          <input
+            type="search"
+            aria-label="Filter output"
+            placeholder="Filter output"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-8 min-w-[140px] flex-1 rounded-[8px] border border-border bg-[var(--surface)] px-[9px] text-[12.5px] outline-none focus:border-[var(--brand)]"
+          />
+          {sources.length > 1 && (
+            <select
+              aria-label="Filter by source"
+              value={pickedSource}
+              onChange={(e) => setSource(e.target.value)}
+              className="h-8 max-w-[220px] rounded-[8px] border border-border bg-[var(--surface)] px-[7px] text-[12.5px] outline-none"
+            >
+              <option value={ALL}>All sources</option>
+              {sources.map((src) => (
+                <option key={src} value={src}>
+                  {src}
+                </option>
+              ))}
+            </select>
+          )}
+          <div role="group" aria-label="Filter by kind" className="flex flex-wrap gap-[5px]">
+            {KINDS.map((kind) => {
+              const on = kinds.has(kind);
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() =>
+                    setKinds((prev) => {
+                      const next = new Set(prev);
+                      if (!next.delete(kind)) next.add(kind);
+                      return next;
+                    })
+                  }
+                  className={cn(
+                    "h-8 rounded-[8px] border px-[9px] text-[12px]",
+                    on
+                      ? "border-[var(--brand)] bg-[var(--brand-weak)] text-[var(--text)]"
+                      : "border-border text-[var(--text-2)] hover:bg-[var(--surface-2)]",
+                  )}
+                >
+                  {KIND_LABEL[kind]}
+                </button>
+              );
+            })}
+          </div>
+          {filtering && (
+            <>
+              <span role="status" className="text-[11.5px] text-[var(--text-3)]">
+                {shown.length} of {items.length}
+              </span>
+              <button
+                type="button"
+                onClick={clear}
+                className="h-8 rounded-[8px] px-2 text-[12px] text-[var(--brand)] hover:underline"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div
         ref={scroller}
@@ -189,9 +288,13 @@ function RunOutput({
           <p className="m-0 p-6 text-center text-[13px] text-[var(--text-3)]">
             No output recorded for this run yet.
           </p>
+        ) : shown.length === 0 ? (
+          <p className="m-0 p-6 text-center text-[13px] text-[var(--text-3)]">
+            No output matches these filters.
+          </p>
         ) : (
           <ol aria-label="Feed" className="m-0 flex list-none flex-col p-0">
-            {items.map((it) => (
+            {shown.map((it) => (
               <FeedRow key={it.id} item={it} />
             ))}
           </ol>

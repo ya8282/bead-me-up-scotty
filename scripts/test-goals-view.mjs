@@ -93,6 +93,33 @@ try {
   await ask.getByText('❯ 1. Close the sheet', { exact: false }).waitFor();
   await ask.getByText('can’t read any choices', { exact: false }).waitFor();
 
+  // Filters narrow a long feed without touching the server.
+  const filter = output.getByRole('searchbox', { name: 'Filter output' });
+  await filter.fill('firefox');
+  assert.equal(await rows.count(), 1);
+  assert.match(await rows.nth(0).innerText(), /probe-firefox\.log/);
+  await output.getByText('1 of 3').waitFor();
+
+  // Nothing matching says so rather than looking like an empty run.
+  await filter.fill('nothing here');
+  await output.getByText('No output matches these filters.').waitFor();
+
+  // Kind toggles stack with the search; Clear puts everything back.
+  await filter.fill('');
+  const runsOnly = output.getByRole('group', { name: 'Filter by kind' }).getByRole('button', { name: 'Runs' });
+  await runsOnly.click();
+  assert.equal(await runsOnly.getAttribute('aria-pressed'), 'true');
+  assert.equal(await rows.count(), 1);
+  assert.match(await rows.nth(0).innerText(), /Read: \/tmp\/probe-firefox\.log/);
+
+  // A subagent's work can be read on its own.
+  await runsOnly.click();
+  await output.getByRole('combobox', { name: 'Filter by source' }).selectOption('main');
+  assert.equal(await rows.count(), 2);
+  await output.getByRole('button', { name: 'Clear' }).click();
+  assert.equal(await rows.count(), 3);
+  assert.equal(await output.getByText('of 3', { exact: false }).count(), 0);
+
   // Live: new output arrives without a reload.
   feeds.ab12cd34.items.push({ id: '4', at: at(4), source: 'main', kind: 'text', text: 'Answer received, carrying on.' });
   await output.getByText('Answer received, carrying on.').waitFor({ timeout: 8000 });

@@ -13,6 +13,7 @@ import {
   type GoalFeedResponse,
   type GoalPrompt,
   type GoalRun,
+  type InteractiveSession,
 } from "./api-client";
 
 /**
@@ -45,7 +46,7 @@ export function goalRepoPath(projectId: string): string {
  */
 
 export { MAX_GOAL_BEADS };
-export type { GoalRun };
+export type { GoalRun, InteractiveSession };
 
 /**
  * States that release the lock. Only "done" is confirmed terminal, so anything
@@ -85,12 +86,17 @@ function parseAgents(stdout: string): unknown[] {
   }
 }
 
-/** Every background session started anywhere in this repo's project folder, newest first. */
-export async function listGoals(repoPath: string): Promise<GoalRun[]> {
+/** Every session `claude agents` reports anywhere in this repo's project folder. */
+async function listAgents(repoPath: string): Promise<Record<string, unknown>[]> {
   const { root } = goalProject(repoPath);
   const stdout = await runClaudeCli(["agents", "--json", "--all", "--cwd", root], 20_000);
-  return parseAgents(stdout)
-    .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+  return parseAgents(stdout).filter((s): s is Record<string, unknown> => !!s && typeof s === "object");
+}
+
+/** Every background session started anywhere in this repo's project folder, newest first. */
+export async function listGoals(repoPath: string): Promise<GoalRun[]> {
+  const agents = await listAgents(repoPath);
+  return agents
     .filter((s) => s.kind === "background" && typeof s.id === "string")
     .map((s) => {
       const state = typeof s.state === "string" ? s.state : "unknown";
@@ -110,6 +116,24 @@ export async function listGoals(repoPath: string): Promise<GoalRun[]> {
 /** The run currently holding this repo's working tree, if any. */
 export async function activeGoal(repoPath: string): Promise<GoalRun | null> {
   return (await listGoals(repoPath)).find((r) => r.live) ?? null;
+}
+
+/**
+ * Interactive Claude Code sessions (an attached terminal, not a `/goal` run)
+ * open anywhere in this repo's project folder. A busy one is a second writer
+ * the moment `/goal` switches the tree to a `goal/` branch under it; an idle
+ * one is only a warning, since nothing is being written right now.
+ */
+export async function listInteractiveSessions(repoPath: string): Promise<InteractiveSession[]> {
+  const agents = await listAgents(repoPath);
+  return agents
+    .filter((s) => s.kind === "interactive" && typeof s.pid === "number")
+    .map((s) => ({
+      pid: s.pid as number,
+      cwd: typeof s.cwd === "string" ? s.cwd : repoPath,
+      name: typeof s.name === "string" ? s.name : undefined,
+      status: typeof s.status === "string" ? s.status : "unknown",
+    }));
 }
 
 /**
@@ -139,6 +163,17 @@ export async function startGoal(repoPath: string, ids: string[]): Promise<GoalRu
         `It owns the working tree until it finishes. Run "claude attach ${live.id}" ` +
         `to take it over, or "claude stop ${live.id}" to end it.`,
       "goal_run_active",
+    );
+  }
+
+  // Same tree, different door: a person typing into an attached session is a
+  // second writer the moment /goal switches it to a goal/ branch under them.
+  const busy = (await listInteractiveSessions(repoPath)).find((s) => s.status === "busy");
+  if (busy) {
+    throw new AiError(
+      `Interactive session ${busy.pid}${busy.name ? ` (${busy.name})` : ""} is busy in this project ` +
+        `folder. Close it or wait for it to go idle, then try again.`,
+      "interactive_session_busy",
     );
   }
 

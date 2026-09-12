@@ -2,7 +2,13 @@ import { z } from "zod";
 import { getStore } from "@/lib/store";
 import { ok, fail } from "@/lib/api";
 import { AiError } from "@/lib/ai";
-import { goalRepoPath as repoPathOf, listGoals, startGoal, MAX_GOAL_BEADS } from "@/lib/goal";
+import {
+  goalRepoPath as repoPathOf,
+  listGoals,
+  listInteractiveSessions,
+  startGoal,
+  MAX_GOAL_BEADS,
+} from "@/lib/goal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +23,9 @@ const bodySchema = z.object({
 export async function GET(_req: Request, { params }: Ctx) {
   try {
     const { projectId } = await params;
-    const runs = await listGoals(repoPathOf(projectId));
-    return ok({ runs, active: runs.find((r) => r.live) ?? null });
+    const repoPath = repoPathOf(projectId);
+    const [runs, interactive] = await Promise.all([listGoals(repoPath), listInteractiveSessions(repoPath)]);
+    return ok({ runs, active: runs.find((r) => r.live) ?? null, interactive });
   } catch (e) {
     return fail(e);
   }

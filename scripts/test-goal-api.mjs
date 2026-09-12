@@ -231,6 +231,7 @@ try {
   const idle = await json("GET", `/api/p/${pid}/goal`);
   assert.equal(idle.status, 200, "GET goal");
   assert.equal(idle.body.active, null, "no run should be active yet");
+  assert.deepEqual(idle.body.interactive, [], "no interactive sessions to start with");
 
   // 2. Unknown ids never reach the prompt.
   const unknown = await json("POST", `/api/p/${pid}/goal`, { ids: ["nope-999"] });
@@ -385,6 +386,50 @@ try {
   assert.equal(late.status, 409, "a run that is not waiting cannot be answered");
   assert.equal(fs.readFileSync(keysFile, "utf8"), "untouched", "and nothing was typed");
   assert.equal(finished.body.items.length, 6, "a finished run's feed stays readable");
+
+  // 10. An interactive session (an attached terminal, not a /goal run) in the
+  //     same project folder is a second writer the moment it is busy; idle is
+  //     only a warning, since nothing is being written right now.
+  const withBusy = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  withBusy.push({
+    pid: 66525,
+    cwd: PROJECT,
+    kind: "interactive",
+    startedAt: Date.now(),
+    sessionId: "aaaaaaaa-1111-2222-3333-444444444444",
+    name: "bead-me-up-de",
+    status: "busy",
+  });
+  fs.writeFileSync(stateFile, JSON.stringify(withBusy));
+
+  const blockedByBusy = await json("POST", `/api/p/${pid}/goal`, { ids: [task.id] });
+  assert.equal(blockedByBusy.status, 409, "a busy interactive session must refuse the launch");
+  assert.equal(blockedByBusy.body.code, "interactive_session_busy", "with its own error code");
+  assert.match(blockedByBusy.body.error, /66525/, "the refusal names the session's pid");
+  assert.match(blockedByBusy.body.error, /bead-me-up-de/, "and its name");
+
+  const reportedBusy = await json("GET", `/api/p/${pid}/goal`);
+  assert.deepEqual(
+    reportedBusy.body.interactive.map((s) => [s.pid, s.name, s.status]),
+    [[66525, "bead-me-up-de", "busy"]],
+    "GET reports the interactive session alongside runs/active",
+  );
+
+  // Idle does not block: the same set now starts a second background run.
+  const idled = JSON.parse(fs.readFileSync(stateFile, "utf8")).map((s) =>
+    s.kind === "interactive" ? { ...s, status: "idle" } : s,
+  );
+  fs.writeFileSync(stateFile, JSON.stringify(idled));
+
+  const startedWithIdle = await json("POST", `/api/p/${pid}/goal`, { ids: [task.id] });
+  assert.equal(
+    startedWithIdle.status,
+    202,
+    `an idle interactive session must not block a run: ${JSON.stringify(startedWithIdle.body)}`,
+  );
+
+  const reportedIdle = await json("GET", `/api/p/${pid}/goal`);
+  assert.equal(reportedIdle.body.interactive[0].status, "idle", "GET reflects it going idle");
 
   console.log("test-goal-api: all checks passed");
 } catch (e) {

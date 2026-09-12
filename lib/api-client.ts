@@ -31,10 +31,20 @@ export interface GoalRun {
   name?: string;
   live: boolean;
 }
+/** An attached terminal session, as `claude agents --json` reports it — not a `/goal` run. */
+export interface InteractiveSession {
+  pid: number;
+  cwd: string;
+  name?: string;
+  /** "busy" mid-turn, "idle" waiting at the prompt. */
+  status: string;
+}
 export interface GoalRunsResponse {
   runs: GoalRun[];
   /** The run holding the working tree, if any. Only one can be live at a time. */
   active: GoalRun | null;
+  /** Interactive sessions open in the project folder, so the confirm dialog can warn before launch. */
+  interactive: InteractiveSession[];
 }
 export interface GoalStartResponse {
   run: GoalRun;

@@ -29,6 +29,9 @@ export function RunGoalButton({
   const start = useStartGoal();
 
   const active = data?.active ?? null;
+  // Busy is refused server-side (toastError surfaces it); idle is only a warning,
+  // since nothing is being written right now.
+  const idleSession = (data?.interactive ?? []).find((s) => s.status === "idle");
   const tooMany = ids.length > MAX_GOAL_BEADS;
   const disabled = readOnly || ids.length === 0 || tooMany || !!active || start.isPending;
 
@@ -75,6 +78,13 @@ export function RunGoalButton({
               <li key={id}>{id}</li>
             ))}
           </ul>
+          {idleSession && (
+            <p className="m-0 rounded-lg border border-border bg-[var(--surface-2)] p-2 text-[12px] leading-[1.5] text-[var(--text-2)]">
+              {idleSession.name ? `"${idleSession.name}"` : `pid ${idleSession.pid}`} is an idle
+              interactive session in this project folder. Starting this run switches that tree to a
+              goal/ branch under it.
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <button
               type="button"

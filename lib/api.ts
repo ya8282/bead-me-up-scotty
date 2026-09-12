@@ -41,7 +41,7 @@ export function fail(err: unknown) {
     // A live goal run is a precondition conflict: the request was well-formed
     // and retrying it verbatim works once that run finishes.
     const status =
-      err.code === "goal_run_active"
+      err.code === "goal_run_active" || err.code === "interactive_session_busy"
         ? 409
         : err.code === "unknown_run"
           ? 404

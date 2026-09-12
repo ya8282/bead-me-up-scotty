@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { toast } from "sonner";
+import { Menu } from "lucide-react";
 import { type BeadType } from "@/lib/schema";
 import Link from "next/link";
 import { useBeads } from "@/hooks/use-beads";
@@ -33,6 +34,8 @@ import { useNotificationActivation } from "@/hooks/use-notifications";
 export function AppShell({ projectId }: { projectId: string }) {
   const [view, setView] = useLastView();
   const { toggle: toggleTheme } = useTheme();
+  // Off-canvas nav state below the desktop breakpoint; see components/sidebar.tsx.
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   // Drawer navigation TRAIL, not a single id: clicking a subtask from its
   // parent used to replace the drawer outright, leaving no way back (GH #15).
   // The visible bead is the last entry.
@@ -204,6 +207,19 @@ export function AppShell({ projectId }: { projectId: string }) {
     >
       <div className="flex h-full flex-col overflow-hidden bg-background text-foreground text-sm">
         <ReadOnlyBanner />
+        {/* A dedicated strip, not an overlay: it pushes every per-view header
+            down instead of floating a button on top of one. */}
+        <div className="flex flex-shrink-0 items-center gap-[10px] border-b border-border bg-[var(--surface)] px-[14px] py-[10px] md:hidden">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setMobileNavOpen(true)}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[9px] border border-border text-[var(--text-2)] hover:bg-[var(--surface-2)]"
+          >
+            <Menu size={18} />
+          </button>
+          <span className="text-sm font-[650] tracking-[-.01em]">Bead Me Up Scotty</span>
+        </div>
         <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           view={view}
@@ -211,6 +227,8 @@ export function AppShell({ projectId }: { projectId: string }) {
           kind={data?.meta?.kind}
           projectId={projectId}
           live={live}
+          mobileOpen={mobileNavOpen}
+          onMobileOpenChangeAction={setMobileNavOpen}
         />
         <main className="relative flex min-w-0 flex-1 flex-col">
           {errorMessage && view !== "settings" ? (

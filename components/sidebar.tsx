@@ -14,6 +14,7 @@ import {
 import { initials, avatarColor, needsHuman, readyHumanGate } from "@/lib/beads-view";
 import { useGamification } from "@/hooks/use-beads";
 import { useGoalRuns } from "@/hooks/use-goal";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 // GITHUB_REPO is shared with the build badge (where bug/feature issues are filed).
 import { GITHUB_REPO } from "@/lib/build-info";
 import { BuildBadge } from "@/components/build-badge";
@@ -57,12 +58,19 @@ export function Sidebar({
   kind,
   projectId,
   live,
+  mobileOpen,
+  onMobileOpenChangeAction,
 }: {
   view: View;
   onView: (v: View) => void;
   kind?: "bd" | "demo";
   projectId: string;
   live?: boolean;
+  // Below the desktop breakpoint the same nav renders inside a Sheet instead
+  // of the fixed aside; the toggle that opens it lives in AppShell so it can
+  // sit above every per-view header without colliding with any of them.
+  mobileOpen: boolean;
+  onMobileOpenChangeAction: (open: boolean) => void;
 }) {
   const { mode, toggle } = useTheme();
   const { meta, beads, index } = useApp();
@@ -77,8 +85,10 @@ export function Sidebar({
   const activeRun = useGoalRuns(projectId, kind === "bd").data?.active ?? null;
   const needsYouTotal = needsYouCount + (activeRun?.state === "blocked" ? 1 : 0);
 
-  return (
-    <aside className="flex w-[228px] flex-shrink-0 flex-col border-r border-border bg-[var(--surface)] p-[18px_14px]">
+  // Rendered once, mounted either in the desktop aside or the mobile Sheet
+  // (never both at once), so there is one nav list to keep in sync, not two.
+  const panel = (
+    <>
       <div className="flex items-center gap-[10px] px-2 pb-[18px] pt-1">
         <div
           className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-[9px] text-white"
@@ -100,7 +110,11 @@ export function Sidebar({
           return (
             <button
               key={n.key}
-              onClick={() => onView(n.key)}
+              onClick={() => {
+                onView(n.key);
+                // Picking a view must not leave the nav covering it.
+                onMobileOpenChangeAction(false);
+              }}
               className={cn(
                 "flex w-full items-center gap-[10px] rounded-[9px] px-[10px] py-2 text-left text-[13.5px] transition-colors",
                 active
@@ -200,6 +214,30 @@ export function Sidebar({
         <UpdateIndicator />
         <BuildBadge />
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden w-[228px] flex-shrink-0 flex-col border-r border-border bg-[var(--surface)] p-[18px_14px] md:flex">
+        {panel}
+      </aside>
+      {/* Off-canvas below the desktop breakpoint; the toggle lives in AppShell
+          so it stays above every per-view header instead of colliding with one. */}
+      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChangeAction}>
+        <SheetContent
+          side="left"
+          // Inline width, not a className override: the base component's
+          // data-[side=left]:w-3/4 utility would otherwise win the cascade
+          // regardless of class order (see bead-detail-drawer.tsx for the
+          // same pattern with the resizable drawer width).
+          style={{ width: 228, maxWidth: "85vw" }}
+          className="flex flex-col gap-0 border-r border-border bg-[var(--surface)] p-[18px_14px] md:hidden"
+        >
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          {panel}
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

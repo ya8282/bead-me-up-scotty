@@ -6,6 +6,7 @@ import { CopyableId } from "@/components/copyable-id";
 import { useGoalFeed, useGoalRuns } from "@/hooks/use-goal";
 import { fmtDateTime, relTime } from "@/lib/beads-view";
 import { GoalQuestion } from "@/components/goal-question";
+import { DescriptionContent } from "@/components/description-content";
 import type { GoalFeedItem, GoalPrompt, GoalRun } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
@@ -207,7 +208,11 @@ function RunOutput({
 }
 
 function FeedRow({ item }: { item: GoalFeedItem }) {
+  const { projectId } = useApp();
   const sub = item.source !== "main";
+  // What the run says is markdown it wrote for a person to read, so tables and
+  // lists render as such. Tool and command lines are argv, not prose.
+  const prose = item.kind === "text";
   return (
     <li className="grid grid-cols-[64px_1fr] gap-x-3 border-b border-border/60 py-[7px] last:border-b-0">
       <time dateTime={item.at} title={fmtDateTime(item.at)} className="pt-px font-mono text-[11px] text-[var(--text-3)]">
@@ -222,16 +227,24 @@ function FeedRow({ item }: { item: GoalFeedItem }) {
             </span>
           )}
         </div>
-        <div
-          className={cn(
-            "break-words text-[var(--text)]",
-            item.kind === "tool" || item.kind === "command"
-              ? "font-mono text-[12px] text-[var(--text-2)]"
-              : "whitespace-pre-wrap text-[13px] leading-[1.5]",
-          )}
-        >
-          {item.text}
-        </div>
+        {prose ? (
+          <DescriptionContent
+            text={item.text}
+            projectId={projectId}
+            className="break-words text-[13px] leading-[1.5] text-[var(--text)]"
+          />
+        ) : (
+          <div
+            className={cn(
+              "break-words text-[var(--text)]",
+              item.kind === "tool" || item.kind === "command"
+                ? "font-mono text-[12px] text-[var(--text-2)]"
+                : "whitespace-pre-wrap text-[13px] leading-[1.5]",
+            )}
+          >
+            {item.text}
+          </div>
+        )}
       </div>
     </li>
   );

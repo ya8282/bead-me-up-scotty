@@ -21,7 +21,20 @@ const feeds = {
     ],
     screen: 'repo-tyw9: Which fix?\n❯ 1. Close the sheet\n  2. Raise the scrim',
   },
-  '99ee88dd': { items: [{ id: '9', at: at(3), source: 'main', kind: 'text', text: 'All done.' }], screen: null },
+  '99ee88dd': {
+    items: [
+      { id: '9', at: at(3), source: 'main', kind: 'text', text: 'All done.' },
+      {
+        id: '10',
+        at: at(4),
+        source: 'main',
+        kind: 'text',
+        text: '| Bead | Result |\n| --- | --- |\n| repo-tyw9 | closed |\n| 0p2l.4 | deferred |',
+      },
+      { id: '11', at: at(5), source: 'main', kind: 'tool', text: 'Bash: echo "| not | a table |"' },
+    ],
+    screen: null,
+  },
 };
 let runs = [waiting, finished];
 
@@ -87,6 +100,15 @@ try {
   // Picking an earlier run shows its feed, and nothing is waiting there.
   await runButtons.nth(1).click();
   await output.getByText('All done.').waitFor();
+
+  // What the run says is markdown: a GFM table becomes a real table.
+  const table = output.getByRole('table');
+  await table.waitFor();
+  assert.deepEqual(await table.getByRole('columnheader').allInnerTexts(), ['Bead', 'Result']);
+  assert.match(await table.innerText(), /repo-tyw9[\s\S]*closed/);
+  // A tool line is argv, not prose, so its pipes stay literal.
+  assert.equal(await output.getByRole('table').count(), 1);
+  await output.getByText('Bash: echo "| not | a table |"').waitFor();
   assert.equal(await output.getByRole('region', { name: /is asking$/ }).count(), 0);
   assert.equal(await output.getByText('Four beads need a decision.').count(), 0);
 

@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useApp } from "@/components/app-context";
 import { CopyableId } from "@/components/copyable-id";
+import { DescriptionContent } from "@/components/description-content";
 import { useAnswerGoal, useGoalFeed } from "@/hooks/use-goal";
 import type { GoalPrompt, GoalRun } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,7 @@ export function GoalQuestion({
   prompt: GoalPrompt | null;
   screen: string | null;
 }) {
-  const { readOnly } = useApp();
+  const { projectId, readOnly } = useApp();
   const answer = useAnswerGoal();
   const [typing, setTyping] = React.useState<number | null>(null);
   const [text, setText] = React.useState("");
@@ -65,9 +66,11 @@ export function GoalQuestion({
           {prompt.tabs && (
             <div className="mb-2 font-mono text-[11px] text-[var(--text-3)]">{prompt.tabs}</div>
           )}
-          <p className="m-0 mb-3 whitespace-pre-wrap text-[13.5px] font-[550] leading-[1.45] text-[var(--text)]">
-            {prompt.question || "Choose one:"}
-          </p>
+          <DescriptionContent
+            text={prompt.question || "Choose one:"}
+            projectId={projectId}
+            className="mb-3 text-[13.5px] font-[550] leading-[1.45] text-[var(--text)]"
+          />
           <div role="group" aria-label="Choices" className="flex flex-col gap-2">
             {prompt.options.map((o) =>
               typing === o.n ? (
